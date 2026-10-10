@@ -81,7 +81,7 @@ async def checkout_and_log(interaction: discord.Interaction, depot_code: str, pl
     if not success:
         await interaction.response.send_message(
             "You already have an active flight, or this depot is no longer active. "
-            "Log your return first with `/return`.",
+            "Log your return first with `/scum airfield return`.",
             ephemeral=True
         )
         return

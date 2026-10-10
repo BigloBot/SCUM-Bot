@@ -28,25 +28,36 @@ def has_aviator_role():
     return commands.check(predicate)
 
 def register(bot: commands.Bot):
-    # Discord only applies command permissions to top-level commands, so every command is top-level.
-    # Admin commands are hidden from everyone else (default_permissions) and also enforced when run.
+    # Everything lives under /scum airfield. Discord only applies command visibility to top-level
+    # commands, so /scum stays visible to everyone and permissions are enforced when a command runs.
+
+    @bot.hybrid_group(name="scum", description="SCUM bot commands.")
+    @commands.guild_only()
+    async def scum(ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send("Try `/scum airfield`.", ephemeral=True)
+
+    @scum.group(name="airfield", description="Airfield depots, stockpiles and flights.")
+    async def airfield(ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send("Try `/scum airfield panel`, `flight`, or `return`.", ephemeral=True)
 
     # ==================== AVIATOR COMMANDS ====================
-    @bot.hybrid_command(name="depot", description="Open the depot control panel.")
+    @airfield.command(name="panel", description="Open the depot control panel.")
     @commands.guild_only()
     @has_aviator_role()
-    async def depot(ctx: commands.Context):
+    async def panel(ctx: commands.Context):
         forum_id = AirfieldRepository.get_config("forum_channel_id")
         if not forum_id:
             if ctx.author.guild_permissions.administrator:
-                await ctx.send("No forum channel is set yet. Run `/forum` first.", ephemeral=True)
+                await ctx.send("No forum channel is set yet. Run `/scum airfield config` first.", ephemeral=True)
             else:
                 await ctx.send("The forum channel hasn't been set up by an admin yet.", ephemeral=True)
             return
 
         forum_channel = ctx.guild.get_channel(int(forum_id))
         if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
-            await ctx.send("The configured forum channel is no longer valid. An admin needs to run `/forum` again.", ephemeral=True)
+            await ctx.send("The configured forum channel is no longer valid. An admin needs to run `/scum airfield config` again.", ephemeral=True)
             return
 
         war = AirfieldRepository.get_active_war()
@@ -60,7 +71,7 @@ def register(bot: commands.Bot):
         )
         await ctx.send(embed=embed, view=DepotManagementView(forum_channel), ephemeral=True)
 
-    @bot.hybrid_command(name="flight", description="Take an aircraft out of a depot.")
+    @airfield.command(name="flight", description="Take an aircraft out of a depot.")
     @commands.guild_only()
     @has_aviator_role()
     async def flight(ctx: commands.Context):
@@ -70,7 +81,7 @@ def register(bot: commands.Bot):
             return
         await ctx.send("Select the depot you are taking an aircraft from:", view=DepotFlightView(), ephemeral=True)
 
-    @bot.hybrid_command(name="return", description="Log the outcome and air kills of your active flight.")
+    @airfield.command(name="return", description="Log the outcome and air kills of your active flight.")
     @commands.guild_only()
     @has_aviator_role()
     async def flight_return(ctx: commands.Context):
@@ -85,53 +96,68 @@ def register(bot: commands.Bot):
             ephemeral=True
         )
 
-    # ==================== ADMIN COMMANDS ====================
-    @bot.hybrid_command(name="forum", description="Set the forum channel used for depot threads.")
-    @app_commands.default_permissions(administrator=True)
+    # ==================== ADMIN CONFIG ====================
+    @airfield.command(name="config", description="View or change airfield settings (admins only).")
+    @app_commands.describe(
+        forum="Forum channel where depot threads are created.",
+        role="Aviator role allowed to run flight commands.",
+        war="Active war number. Locks other wars' depot threads and reopens this war's."
+    )
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
-    async def forum(ctx: commands.Context, channel: discord.ForumChannel):
-        AirfieldRepository.set_config("forum_channel_id", str(channel.id))
-        await ctx.send(f"Forum channel set to **{channel.name}**.", ephemeral=True)
+    async def config(
+        ctx: commands.Context,
+        forum: Optional[discord.ForumChannel] = None,
+        role: Optional[discord.Role] = None,
+        war: Optional[int] = None
+    ):
+        no_pings = discord.AllowedMentions.none()
 
-    @bot.hybrid_command(name="role", description="Set the aviator role that can run flight commands.")
-    @app_commands.default_permissions(administrator=True)
-    @commands.guild_only()
-    @commands.has_permissions(administrator=True)
-    async def role(ctx: commands.Context, role: discord.Role):
-        AirfieldRepository.set_config("aviator_role_id", str(role.id))
-        await ctx.send(f"Aviator role set to **{role.name}**.", ephemeral=True)
-
-    @bot.hybrid_command(name="war", description="Show the active war, or switch to another war number.")
-    @app_commands.default_permissions(administrator=True)
-    @commands.guild_only()
-    @commands.has_permissions(administrator=True)
-    async def war(ctx: commands.Context, war_number: Optional[int] = None):
-        if war_number is None:
-            active = AirfieldRepository.get_active_war()
-            await ctx.send(f"The active war is **War {active}**.", ephemeral=True)
+        # With no options, just show the current settings.
+        if forum is None and role is None and war is None:
+            forum_id = AirfieldRepository.get_config("forum_channel_id")
+            role_id = AirfieldRepository.get_config("aviator_role_id")
+            await ctx.send(
+                "**Airfield settings**\n"
+                f"Forum: {f'<#{forum_id}>' if forum_id else 'not set'}\n"
+                f"Aviator role: {f'<@&{role_id}>' if role_id else 'not set (admins only)'}\n"
+                f"Active war: **War {AirfieldRepository.get_active_war()}**",
+                ephemeral=True,
+                allowed_mentions=no_pings
+            )
             return
 
-        if war_number < 1:
+        if war is not None and war < 1:
             await ctx.send("The war number must be 1 or higher.", ephemeral=True)
             return
 
         await ctx.defer(ephemeral=True)
-        AirfieldRepository.set_active_war(war_number)
+        changes = []
 
-        # Every depot thread is brought in line with the new active war, so switching back to an
-        # earlier war reopens exactly that war's threads and locks all the others.
-        counts = await sync_war_threads(ctx.guild, war_number)
+        if forum is not None:
+            AirfieldRepository.set_config("forum_channel_id", str(forum.id))
+            changes.append(f"Forum set to {forum.mention}.")
 
-        message = (
-            f"Active war set to **War {war_number}**. "
-            f"Depot threads synced: {counts['changed']} updated, {counts['unchanged']} already correct."
-        )
-        problems = []
-        if counts["failed"]:
-            problems.append(f"{counts['failed']} could not be updated (check the bot's Manage Threads permission)")
-        if counts["missing"]:
-            problems.append(f"{counts['missing']} no longer exist in Discord")
-        if problems:
-            message += "\nNote: " + "; ".join(problems) + "."
-        await ctx.send(message, ephemeral=True)
+        if role is not None:
+            AirfieldRepository.set_config("aviator_role_id", str(role.id))
+            changes.append(f"Aviator role set to {role.mention}.")
+
+        if war is not None:
+            AirfieldRepository.set_active_war(war)
+            # Every depot thread is brought in line with the new active war, so switching back to an
+            # earlier war reopens exactly that war's threads and locks all the others.
+            counts = await sync_war_threads(ctx.guild, war)
+            line = (
+                f"Active war set to **War {war}**. "
+                f"Depot threads synced: {counts['changed']} updated, {counts['unchanged']} already correct."
+            )
+            problems = []
+            if counts["failed"]:
+                problems.append(f"{counts['failed']} could not be updated (check the bot's Manage Threads permission)")
+            if counts["missing"]:
+                problems.append(f"{counts['missing']} no longer exist in Discord")
+            if problems:
+                line += "\nNote: " + "; ".join(problems) + "."
+            changes.append(line)
+
+        await ctx.send("\n".join(changes), ephemeral=True, allowed_mentions=no_pings)
