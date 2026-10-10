@@ -1,4 +1,5 @@
 import logging
+import re
 import discord
 from discord import ui
 from app.features.airfield.repository import AirfieldRepository
@@ -20,7 +21,10 @@ MISSION_PRESETS = [
     "Other"
 ]
 
-INTERNAL_ERROR = "An internal error occurred. Please try again, and let an admin know if it keeps happening."
+# Depot passcodes are exactly six ASCII digits (kept as text so leading zeros survive).
+PASSCODE_PATTERN = re.compile(r"[0-9]{6}")
+
+INTERNAL_ERROR ="An internal error occurred. Please try again, and let an admin know if it keeps happening."
 
 
 # ==================== SHARED HELPERS ====================
@@ -100,14 +104,23 @@ async def checkout_and_log(interaction: discord.Interaction, depot_code: str, pl
 # ==================== DEPOT MODALS ====================
 
 class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
-    depot_name = ui.TextInput(label="Depot Name", placeholder="e.g. Warden Alpha", required=True)
-    depot_code = ui.TextInput(label="Passcode / Code", placeholder="e.g. W-ALPHA", required=True, max_length=10)
-    depot_location = ui.TextInput(label="Region / Location", placeholder="e.g. Callahan's Passage", required=True)
+    # Name and location are capped so "War-<no.> - <name> - <location>" always fits in a thread title (100 chars).
+    depot_name = ui.TextInput(label="Depot Name", placeholder="e.g. ER-SCUM-AIR", required=True, max_length=40)
+    depot_code = ui.TextInput(label="Passcode (6 digits)", placeholder="e.g. 123456", required=True, min_length=6, max_length=6)
+    depot_location = ui.TextInput(label="Region / Location", placeholder="e.g. Callahan's Passage", required=True, max_length=40)
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.depot_name.value.strip()
         code = self.depot_code.value.strip()
         location = self.depot_location.value.strip()
+
+        # Discord's min/max length is only a client-side hint, so validate here too.
+        if not name or not location:
+            await interaction.response.send_message("The depot name and location can't be empty.", ephemeral=True)
+            return
+        if not PASSCODE_PATTERN.fullmatch(code):
+            await interaction.response.send_message("The passcode must be exactly 6 digits (0-9).", ephemeral=True)
+            return
 
         duplicate = AirfieldRepository.check_duplicate(name, code)
         if duplicate:
