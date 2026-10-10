@@ -3,6 +3,7 @@ import re
 import discord
 from discord import ui
 from app.features.airfield.repository import AirfieldRepository
+from app.features.airfield.permissions import member_can_fly
 from app.features.airfield.threads import (
     close_depot_thread,
     depot_thread_title,
@@ -28,16 +29,6 @@ INTERNAL_ERROR ="An internal error occurred. Please try again, and let an admin 
 
 
 # ==================== SHARED HELPERS ====================
-
-def member_can_fly(member) -> bool:
-    """Admins, or members holding the configured aviator role (admins only until a role is set)."""
-    if not isinstance(member, discord.Member):
-        return False
-    if member.guild_permissions.administrator:
-        return True
-    role_id = AirfieldRepository.get_config("aviator_role_id")
-    return bool(role_id) and any(role.id == int(role_id) for role in member.roles)
-
 
 async def send_internal_error(interaction: discord.Interaction):
     """Generic error for the user; the details only go to the bot's logs."""

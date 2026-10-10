@@ -4,13 +4,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from app.features.airfield.panel import refresh_control_panel
+from app.features.airfield.permissions import is_airfield_admin, is_server_owner, member_can_fly
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import sync_war_threads
 from app.features.airfield.views import (
     DepotFlightView,
     DepotManagementView,
-    FlightReturnStatusView,
-    member_can_fly
+    FlightReturnStatusView
 )
 
 def has_aviator_role():
@@ -20,6 +20,12 @@ def has_aviator_role():
     """
     async def predicate(ctx: commands.Context):
         return ctx.guild is not None and member_can_fly(ctx.author)
+    return commands.check(predicate)
+
+def has_airfield_admin():
+    """Server owner, Discord administrators, and holders of the admin role the owner has set."""
+    async def predicate(ctx: commands.Context):
+        return ctx.guild is not None and is_airfield_admin(ctx.author)
     return commands.check(predicate)
 
 def register(bot: commands.Bot):
@@ -45,7 +51,7 @@ def register(bot: commands.Bot):
     async def panel(ctx: commands.Context):
         forum_id = AirfieldRepository.get_config("forum_channel_id")
         if not forum_id:
-            if ctx.author.guild_permissions.administrator:
+            if is_airfield_admin(ctx.author):
                 await ctx.send("No forum channel is set yet. Run `/scum airfield config` first.", ephemeral=True)
             else:
                 await ctx.send("The forum channel hasn't been set up by an admin yet.", ephemeral=True)
@@ -94,35 +100,49 @@ def register(bot: commands.Bot):
     @app_commands.describe(
         forum="Forum channel where depot threads are created.",
         controls="Channel that holds the permanent control panel message.",
-        role="Aviator role allowed to use the airfield controls and commands.",
+        aviator_role="Role allowed to use the airfield controls and commands.",
+        admin_role="Role that counts as airfield admin, e.g. verified officer (server owner only).",
         war="Active war number. Locks other wars' depot threads and reopens this war's."
     )
     @commands.guild_only()
-    @commands.has_permissions(administrator=True)
+    @has_airfield_admin()
     async def config(
         ctx: commands.Context,
         forum: Optional[discord.ForumChannel] = None,
         controls: Optional[discord.TextChannel] = None,
-        role: Optional[discord.Role] = None,
+        aviator_role: Optional[discord.Role] = None,
+        admin_role: Optional[discord.Role] = None,
         war: Optional[int] = None
     ):
         no_pings = discord.AllowedMentions.none()
 
         # With no options, just show the current settings.
-        if forum is None and controls is None and role is None and war is None:
+        if all(option is None for option in (forum, controls, aviator_role, admin_role, war)):
             forum_id = AirfieldRepository.get_config("forum_channel_id")
             controls_id = AirfieldRepository.get_config("controls_channel_id")
-            role_id = AirfieldRepository.get_config("aviator_role_id")
+            aviator_id = AirfieldRepository.get_config("aviator_role_id")
+            admin_id = AirfieldRepository.get_config("admin_role_id")
             await ctx.send(
                 "**Airfield settings**\n"
                 f"Forum: {f'<#{forum_id}>' if forum_id else 'not set'}\n"
                 f"Controls channel: {f'<#{controls_id}>' if controls_id else 'not set'}\n"
-                f"Aviator role: {f'<@&{role_id}>' if role_id else 'not set (admins only)'}\n"
+                f"Admin role: {f'<@&{admin_id}>' if admin_id else 'not set (Discord administrators only)'}\n"
+                f"Aviator role: {f'<@&{aviator_id}>' if aviator_id else 'not set (admins only)'}\n"
                 f"Active war: **War {AirfieldRepository.get_active_war()}**",
                 ephemeral=True,
                 allowed_mentions=no_pings
             )
             return
+
+        # Only the server owner may decide who counts as an admin, so an admin can't grant it onwards.
+        # Checked before anything is changed, so a refused command changes nothing.
+        if admin_role is not None:
+            if not is_server_owner(ctx.author):
+                await ctx.send("Only the server owner can set the admin role.", ephemeral=True)
+                return
+            if admin_role.is_default():
+                await ctx.send("The admin role can't be @everyone.", ephemeral=True)
+                return
 
         if war is not None and war < 1:
             await ctx.send("The war number must be 1 or higher.", ephemeral=True)
@@ -131,13 +151,17 @@ def register(bot: commands.Bot):
         await ctx.defer(ephemeral=True)
         changes = []
 
+        if admin_role is not None:
+            AirfieldRepository.set_config("admin_role_id", str(admin_role.id))
+            changes.append(f"Admin role set to {admin_role.mention}.")
+
         if forum is not None:
             AirfieldRepository.set_config("forum_channel_id", str(forum.id))
             changes.append(f"Forum set to {forum.mention}.")
 
-        if role is not None:
-            AirfieldRepository.set_config("aviator_role_id", str(role.id))
-            changes.append(f"Aviator role set to {role.mention}.")
+        if aviator_role is not None:
+            AirfieldRepository.set_config("aviator_role_id", str(aviator_role.id))
+            changes.append(f"Aviator role set to {aviator_role.mention}.")
 
         if war is not None:
             AirfieldRepository.set_active_war(war)
