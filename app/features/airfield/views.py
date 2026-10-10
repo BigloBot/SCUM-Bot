@@ -1,8 +1,12 @@
 import logging
-import traceback
 import discord
 from discord import ui
 from app.features.airfield.repository import AirfieldRepository
+from app.features.airfield.threads import (
+    close_depot_thread,
+    depot_thread_title,
+    post_to_depot_thread,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +29,35 @@ MISSION_PRESETS = [
     "Other"
 ]
 
-# Helper function to auto-log flight events in forum threads
+INTERNAL_ERROR = "An internal error occurred. Please try again, and let an admin know if it keeps happening."
+
+
+# ==================== SHARED HELPERS ====================
+
+async def send_internal_error(interaction: discord.Interaction):
+    """Generic error for the user; the details only go to the bot's logs."""
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(INTERNAL_ERROR, ephemeral=True)
+        else:
+            await interaction.response.send_message(INTERNAL_ERROR, ephemeral=True)
+    except Exception:
+        logger.error("Could not deliver the internal error message to the user.")
+
+
+class BaseView(ui.View):
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: ui.Item) -> None:
+        logger.error(f"Error in {type(self).__name__}: {error}", exc_info=(type(error), error, error.__traceback__))
+        await send_internal_error(interaction)
+
+
+class BaseModal(ui.Modal):
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        logger.error(f"Error in {type(self).__name__}: {error}", exc_info=(type(error), error, error.__traceback__))
+        await send_internal_error(interaction)
+
+
+# Helper function to auto-log stockpile events in forum threads
 async def log_to_depot_thread(guild: discord.Guild, depot_code: str, message: str, airfield_id: int = None):
     # An explicit airfield_id targets that exact depot row (e.g. the one a flight left from);
     # otherwise the code resolves to the current war's depot.
@@ -33,17 +65,50 @@ async def log_to_depot_thread(guild: discord.Guild, depot_code: str, message: st
         depot = AirfieldRepository.get_depot_by_id(airfield_id)
     else:
         depot = AirfieldRepository.get_depot(depot_code)
-    if depot and depot["thread_id"]:
-        try:
-            thread = guild.get_channel(int(depot["thread_id"]))
-            if thread:
-                await thread.send(message)
-        except Exception as e:
-            logger.error(f"Failed to send log to thread {depot['thread_id']}: {e}")
+    await post_to_depot_thread(guild, depot, message)
+
+
+def article(noun: str) -> str:
+    """'a' or 'an' for the given (plain, unformatted) noun."""
+    return "an" if noun[:1].lower() in "aeiou" else "a"
+
+
+def join_natural(parts: list[str]) -> str:
+    if len(parts) <= 2:
+        return " and ".join(parts)
+    return ", ".join(parts[:-1]) + f", and {parts[-1]}"
+
+
+async def checkout_and_log(interaction: discord.Interaction, depot_code: str, plane_type: str, mission: str):
+    """Checks a plane out for the pilot, confirms to them, and logs it in the depot thread."""
+    user_id = str(interaction.user.id)
+    success = AirfieldRepository.checkout_plane(depot_code, plane_type, mission, user_id)
+    if not success:
+        await interaction.response.send_message(
+            "You already have an active flight, or this depot is no longer active. "
+            "Log your return first with `/return`.",
+            ephemeral=True
+        )
+        return
+
+    depot = AirfieldRepository.get_depot(depot_code)
+    location = depot["location"] if depot else "Unknown"
+    await interaction.response.send_message(
+        f"Checked out **{plane_type}** from **{depot['name'] if depot else depot_code}** ({location}).\n"
+        f"Mission: **{mission}**\n"
+        f"Good hunting.",
+        ephemeral=True
+    )
+    await log_to_depot_thread(
+        interaction.guild,
+        depot_code,
+        f"🛫 {interaction.user.mention} has taken out {article(plane_type)} **{plane_type}** for **{mission}**."
+    )
+
 
 # ==================== DEPOT MODALS ====================
 
-class CreateDepotModal(ui.Modal, title="Create Airfield Depot"):
+class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
     depot_name = ui.TextInput(label="Depot Name", placeholder="e.g. Warden Alpha", required=True)
     depot_code = ui.TextInput(label="Passcode / Code", placeholder="e.g. W-ALPHA", required=True, max_length=10)
     depot_location = ui.TextInput(label="Region / Location", placeholder="e.g. Callahan's Passage", required=True)
@@ -56,31 +121,39 @@ class CreateDepotModal(ui.Modal, title="Create Airfield Depot"):
         duplicate = AirfieldRepository.check_duplicate(name, code)
         if duplicate:
             await interaction.response.send_message(
-                f"❌ A depot with that {'name' if duplicate == 'name' else 'code'} already exists and is active in this war!",
+                f"A depot with that {duplicate} is already active in this war.",
                 ephemeral=True
             )
             return
 
+        # Creating the forum thread can take longer than Discord's 3 second response window.
+        await interaction.response.defer(ephemeral=True)
+
+        war_number = AirfieldRepository.get_active_war()
         forum_channel_id = AirfieldRepository.get_config("forum_channel_id")
         thread = None
         if forum_channel_id:
             forum = interaction.guild.get_channel(int(forum_channel_id))
             if isinstance(forum, discord.ForumChannel):
                 try:
-                    thread_content = f"🛡️ **Depot Created**\nName: **{name}**\nLocation: **{location}**"
+                    thread_content = (
+                        f"🏗️ {interaction.user.mention} has created this depot.\n"
+                        f"War: **{war_number}**\nName: **{name}**\nCode: **{code.upper()}**\nLocation: **{location}**"
+                    )
                     created_thread = await forum.create_thread(
-                        name=f"[{code.upper()}] {name}",
-                        content=thread_content
+                        name=depot_thread_title(war_number, name, location),
+                        content=thread_content,
+                        allowed_mentions=discord.AllowedMentions.none()
                     )
                     thread = created_thread.thread
                 except Exception as e:
                     logger.error(f"Error creating forum thread: {e}")
 
         AirfieldRepository.add_airfield(name, code, location, str(thread.id) if thread else None)
-        await interaction.response.send_message(f"✅ Airfield depot **{name}** created successfully!\nLocation: **{location}**", ephemeral=True)
+        await interaction.followup.send(f"Depot **{name}** created. Location: **{location}**.", ephemeral=True)
 
 
-class AddStockModal(ui.Modal, title="Add Aircraft Stock"):
+class AddStockModal(BaseModal, title="Add Aircraft Stock"):
     plane_type = ui.TextInput(label="Aircraft Type", placeholder="e.g. Harbinger (Fighter)", required=True)
     quantity = ui.TextInput(label="Quantity", placeholder="1", default="1", required=True, max_length=3)
 
@@ -94,7 +167,7 @@ class AddStockModal(ui.Modal, title="Add Aircraft Stock"):
             if qty <= 0:
                 raise ValueError()
         except ValueError:
-            await interaction.response.send_message("❌ Please enter a valid positive number for quantity.", ephemeral=True)
+            await interaction.response.send_message("Please enter a valid positive number for the quantity.", ephemeral=True)
             return
 
         plane = self.plane_type.value.strip()
@@ -102,18 +175,18 @@ class AddStockModal(ui.Modal, title="Add Aircraft Stock"):
 
         for _ in range(qty):
             if not AirfieldRepository.add_plane(self.depot_code, plane, user_id):
-                await interaction.response.send_message("❌ That depot is no longer active in the current war.", ephemeral=True)
+                await interaction.response.send_message("That depot is no longer active in the current war.", ephemeral=True)
                 return
 
-        await interaction.response.send_message(f"✅ Added **{qty}x {plane}** to depot.", ephemeral=True)
+        await interaction.response.send_message(f"Added **{qty}x {plane}** to the stockpile.", ephemeral=True)
         await log_to_depot_thread(
             interaction.guild,
             self.depot_code,
-            f"📦 **Stock Added:** {interaction.user.mention} added **{qty}x {plane}** to stockpile."
+            f"📦 {interaction.user.mention} has added **{qty}x {plane}** to the stockpile."
         )
 
 
-class CustomMissionModal(ui.Modal, title="Check Out Aircraft - Custom Mission"):
+class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission"):
     usecase = ui.TextInput(label="Flight Purpose / Operation Details", placeholder="Describe custom operation...", required=True, style=discord.TextStyle.paragraph)
 
     def __init__(self, depot_code: str, plane_type: str):
@@ -122,32 +195,12 @@ class CustomMissionModal(ui.Modal, title="Check Out Aircraft - Custom Mission"):
         self.plane_type = plane_type
 
     async def on_submit(self, interaction: discord.Interaction):
-        user_id = str(interaction.user.id)
-        mission = self.usecase.value.strip()
-        success = AirfieldRepository.checkout_plane(self.depot_code, self.plane_type, mission, user_id)
-        if not success:
-            await interaction.response.send_message("⚠️ You already have an active flight checked out! Please complete your return log first (`/airfield log return`).", ephemeral=True)
-            return
-
-        depot = AirfieldRepository.get_depot(self.depot_code)
-        location = depot["location"] if depot else "Unknown Location"
-        await interaction.response.send_message(
-            f"✈️ Successfully checked out **{self.plane_type}**!\n"
-            f"Mission: **{mission}**\n"
-            f"Location: **{location}**\n"
-            f"Good hunting, aviator!",
-            ephemeral=True
-        )
-        await log_to_depot_thread(
-            interaction.guild,
-            self.depot_code,
-            f"✈️ **Aircraft Departure:** {interaction.user.mention} checked out a **{self.plane_type}**.\nMission: *{mission}*"
-        )
+        await checkout_and_log(interaction, self.depot_code, self.plane_type, self.usecase.value.strip())
 
 
 # ==================== STEP 2: FLIGHT RETURN KILL SHEET MODAL ====================
 
-class StructuredKillModal(ui.Modal, title="Sortie Kill Sheet"):
+class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
     toxot_kills = ui.TextInput(label="Toxot Kills", placeholder="0", default="0", required=False, max_length=3)
     harpy_kills = ui.TextInput(label="Harpy Kills", placeholder="0", default="0", required=False, max_length=3)
     peregrine_kills = ui.TextInput(label="Peregrine / Tzykalia Kills", placeholder="0", default="0", required=False, max_length=3)
@@ -161,18 +214,15 @@ class StructuredKillModal(ui.Modal, title="Sortie Kill Sheet"):
     async def on_submit(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
 
-        try:
-            t_count = int(self.toxot_kills.value.strip() or "0")
-        except ValueError:
-            t_count = 0
-        try:
-            h_count = int(self.harpy_kills.value.strip() or "0")
-        except ValueError:
-            h_count = 0
-        try:
-            p_count = int(self.peregrine_kills.value.strip() or "0")
-        except ValueError:
-            p_count = 0
+        def count(field: ui.TextInput) -> int:
+            try:
+                return max(0, int(field.value.strip() or "0"))
+            except ValueError:
+                return 0
+
+        t_count = count(self.toxot_kills)
+        h_count = count(self.harpy_kills)
+        p_count = count(self.peregrine_kills)
 
         total_air_kills = t_count + h_count + p_count
 
@@ -189,42 +239,35 @@ class StructuredKillModal(ui.Modal, title="Sortie Kill Sheet"):
         completed = AirfieldRepository.complete_flight(user_id, self.status, total_air_kills, target_summary)
 
         if not completed:
-            await interaction.response.send_message("⚠️ You do not have an active flight to return.", ephemeral=True)
+            await interaction.response.send_message("You do not have an active flight to log.", ephemeral=True)
             return
 
-        status_emoji = "🛬" if self.status == "Returned" else "💥"
-
+        outcome = "returned" if self.status == "Returned" else "lost"
         await interaction.response.send_message(
-            f"✅ **Flight Return Logged!**\n"
-            f"• Aircraft: **{self.plane_type}**\n"
-            f"• Status: {status_emoji} **{self.status}**\n"
-            f"• Confirmed Air Kills: **{air_summary}**\n"
-            f"• Notes: {extra_notes or 'None'}",
+            f"Flight logged: **{self.plane_type}** {outcome}.\n"
+            f"Air kills: **{air_summary}**\n"
+            f"Notes: {extra_notes or 'None'}",
             ephemeral=True
         )
 
-        # Log return event in the depot thread
-        if completed["airfield_code"]:
-            log_msg = (
-                f"{status_emoji} **Sortie Completed:** {interaction.user.mention} logged flight return.\n"
-                f"• Aircraft: **{self.plane_type}**\n"
-                f"• Status: **{self.status}**\n"
-                f"• Air Kills: **{air_summary}**\n"
-                f"• Notes: *{extra_notes or 'None'}*"
-            )
-            await log_to_depot_thread(interaction.guild, completed["airfield_code"], log_msg, completed["airfield_id"])
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        logger.error(f"Exception in StructuredKillModal: {error}")
-        traceback.print_exception(type(error), error, error.__traceback__)
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ An internal error occurred while submitting the kill sheet: `{error}`", ephemeral=True)
+        # Log the outcome in the depot thread the flight left from
+        kills_text = join_natural(air_parts)
+        plane = f"{article(self.plane_type)} **{self.plane_type}**"
+        if self.status == "Returned":
+            log_msg = f"🛬 {interaction.user.mention} has returned {plane} to the stockpile"
+            log_msg += f", taking down {kills_text}." if kills_text else "."
+        else:
+            log_msg = f"💥 {interaction.user.mention} has marked {plane} as lost"
+            log_msg += f", taking down {kills_text} in the process." if kills_text else "."
+        if extra_notes:
+            log_msg += f"\nNotes: *{extra_notes}*"
+        await log_to_depot_thread(interaction.guild, completed["airfield_code"], log_msg, completed["airfield_id"])
 
 
 # ==================== STEP 1: FLIGHT RETURN BUTTONS ====================
 
-class FlightReturnStatusView(ui.View):
-    """Clean Step 1: Pilot clicks Returned or Loss to trigger Kill Sheet popup."""
+class FlightReturnStatusView(BaseView):
+    """Step 1: Pilot clicks Returned or Loss to trigger the Kill Sheet popup."""
     def __init__(self, flight):
         super().__init__(timeout=180)
         plane = "Aircraft"
@@ -259,29 +302,10 @@ class MissionSelect(ui.Select):
         if mission == "Other":
             await interaction.response.send_modal(CustomMissionModal(self.depot_code, self.plane_type))
         else:
-            user_id = str(interaction.user.id)
-            success = AirfieldRepository.checkout_plane(self.depot_code, self.plane_type, mission, user_id)
-            if not success:
-                await interaction.response.send_message("⚠️ You already have an active flight checked out! Please complete your return log first (`/airfield log return`).", ephemeral=True)
-                return
-
-            depot = AirfieldRepository.get_depot(self.depot_code)
-            location = depot["location"] if depot else "Unknown Location"
-            await interaction.response.send_message(
-                f"✈️ Successfully checked out **{self.plane_type}**!\n"
-                f"Mission: **{mission}**\n"
-                f"Location: **{location}**\n"
-                f"Good hunting, aviator!",
-                ephemeral=True
-            )
-            await log_to_depot_thread(
-                interaction.guild,
-                self.depot_code,
-                f"✈️ **Aircraft Departure:** {interaction.user.mention} checked out a **{self.plane_type}**.\nMission: *{mission}*"
-            )
+            await checkout_and_log(interaction, self.depot_code, self.plane_type, mission)
 
 
-class MissionSelectView(ui.View):
+class MissionSelectView(BaseView):
     def __init__(self, depot_code: str, plane_type: str):
         super().__init__(timeout=180)
         self.add_item(MissionSelect(depot_code, plane_type))
@@ -310,10 +334,10 @@ class PlaneSelect(ui.Select):
     async def callback(self, interaction: discord.Interaction):
         plane_type = self.values[0]
         view = MissionSelectView(self.depot_code, plane_type)
-        await interaction.response.send_message(f"Select mission purpose for **{plane_type}**:", view=view, ephemeral=True)
+        await interaction.response.send_message(f"Select the mission for **{plane_type}**:", view=view, ephemeral=True)
 
 
-class PlaneSelectView(ui.View):
+class PlaneSelectView(BaseView):
     def __init__(self, depot_code: str):
         super().__init__(timeout=180)
         self.add_item(PlaneSelect(depot_code))
@@ -335,7 +359,7 @@ class DepotSelect(ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if self.values[0] == "NONE":
-            await interaction.response.send_message("❌ No depots available.", ephemeral=True)
+            await interaction.response.send_message("There are no depots available.", ephemeral=True)
             return
 
         code = self.values[0]
@@ -346,20 +370,27 @@ class DepotSelect(ui.Select):
             stock = AirfieldRepository.get_stock_summary(code)
             stock_str = "\n".join([f"• **{s['plane_type']}**: {s['count']}" for s in stock]) or "No planes registered in stock."
             await interaction.response.send_message(
-                f"🛡️ **Depot Details: {depot['name']}**\n"
+                f"**{depot['name']}**\n"
                 f"Location: **{depot['location']}**\n\n"
                 f"**Stock Inventory:**\n{stock_str}",
                 ephemeral=True
             )
         elif self.action == "delete":
+            depot = AirfieldRepository.get_depot(code)
             AirfieldRepository.delete_airfield(code)
-            await interaction.response.send_message("🗑️ Depot has been deleted/archived.", ephemeral=True)
+            await interaction.response.send_message("Depot deleted. Its thread has been locked and archived.", ephemeral=True)
+            # Log the deletion, then close the thread (history stays in the database and the thread).
+            await post_to_depot_thread(
+                interaction.guild, depot,
+                f"🗑️ {interaction.user.mention} has deleted this depot. This thread is now locked."
+            )
+            await close_depot_thread(interaction.guild, depot, "Depot deleted")
         elif self.action == "flight":
             view = PlaneSelectView(code)
             await interaction.response.send_message("Select the aircraft type you are taking out:", view=view, ephemeral=True)
 
 
-class DepotManagementView(ui.View):
+class DepotManagementView(BaseView):
     def __init__(self, forum_channel: discord.ForumChannel):
         super().__init__(timeout=None)
         self.forum_channel = forum_channel
@@ -368,26 +399,26 @@ class DepotManagementView(ui.View):
     async def create_depot(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(CreateDepotModal())
 
-    @ui.button(label="Add Aircraft Stock", style=discord.ButtonStyle.primary, emoji="📦")
+    @ui.button(label="Add Stock", style=discord.ButtonStyle.primary, emoji="📦")
     async def add_stock(self, interaction: discord.Interaction, button: ui.Button):
-        view = ui.View()
+        view = BaseView()
         view.add_item(DepotSelect("add_stock"))
         await interaction.response.send_message("Select the depot to add stock to:", view=view, ephemeral=True)
 
-    @ui.button(label="View Depots", style=discord.ButtonStyle.secondary, emoji="🔍")
+    @ui.button(label="View Depots", style=discord.ButtonStyle.secondary, emoji="📋")
     async def view_depots(self, interaction: discord.Interaction, button: ui.Button):
-        view = ui.View()
+        view = BaseView()
         view.add_item(DepotSelect("view_details"))
         await interaction.response.send_message("Select the depot to view:", view=view, ephemeral=True)
 
     @ui.button(label="Delete Depot", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def delete_depot(self, interaction: discord.Interaction, button: ui.Button):
-        view = ui.View()
+        view = BaseView()
         view.add_item(DepotSelect("delete"))
-        await interaction.response.send_message("Select the depot you want to delete:", view=view, ephemeral=True)
+        await interaction.response.send_message("Select the depot to delete:", view=view, ephemeral=True)
 
 
-class DepotFlightView(ui.View):
+class DepotFlightView(BaseView):
     def __init__(self):
         super().__init__(timeout=180)
         self.add_item(DepotSelect("flight"))
