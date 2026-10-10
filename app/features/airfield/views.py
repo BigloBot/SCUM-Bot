@@ -10,15 +10,6 @@ from app.features.airfield.threads import (
 
 logger = logging.getLogger(__name__)
 
-# Official Warden Aircraft List
-STANDARD_AIRCRAFT = [
-    "Harbinger (Fighter)",
-    "Welkinrive (Heavy Bomber)",
-    "Austringer (Torpedo Bomber)",
-    "Zealot (Paratrooper Transport)",
-    "White Raven (SeaFighter)"
-]
-
 # Standard mission presets
 MISSION_PRESETS = [
     "Large Ship Escort",
@@ -154,12 +145,12 @@ class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
 
 
 class AddStockModal(BaseModal, title="Add Aircraft Stock"):
-    plane_type = ui.TextInput(label="Aircraft Type", placeholder="e.g. Harbinger (Fighter)", required=True)
     quantity = ui.TextInput(label="Quantity", placeholder="1", default="1", required=True, max_length=3)
 
-    def __init__(self, depot_code: str):
-        super().__init__()
+    def __init__(self, depot_code: str, plane_type: str):
+        super().__init__(title=f"Add {plane_type}"[:45])  # Discord caps modal titles at 45 characters
         self.depot_code = depot_code
+        self.plane_type = plane_type
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -170,7 +161,7 @@ class AddStockModal(BaseModal, title="Add Aircraft Stock"):
             await interaction.response.send_message("Please enter a valid positive number for the quantity.", ephemeral=True)
             return
 
-        plane = self.plane_type.value.strip()
+        plane = self.plane_type
         user_id = str(interaction.user.id)
 
         for _ in range(qty):
@@ -313,34 +304,59 @@ class MissionSelectView(BaseView):
 
 # ==================== CHECKOUT AIRCRAFT SELECT ====================
 
-class PlaneSelect(ui.Select):
-    """Displays stock count subtext for each aircraft type."""
+class AircraftSelect(ui.Select):
+    """
+    The one aircraft dropdown, built from the shared aircraft_types list and annotated with this
+    depot's stock. Used for both taking aircraft out and adding stock; subclasses decide what a pick does.
+    """
     def __init__(self, depot_code: str):
         self.depot_code = depot_code
 
         stock = {s["plane_type"]: s["count"] for s in AirfieldRepository.get_stock_summary(depot_code)}
 
         options = []
-        for p in STANDARD_AIRCRAFT:
-            count = stock.get(p, 0)
-            if count > 0:
-                desc = f"{count} in stockpile"
-            else:
-                desc = "None registered in stockpile"
-            options.append(discord.SelectOption(label=p, description=desc))
+        for aircraft in AirfieldRepository.get_aircraft_types():
+            count = stock.get(aircraft["label"], 0)
+            desc = f"{count} in stockpile" if count > 0 else "None registered in stockpile"
+            options.append(discord.SelectOption(label=aircraft["label"], description=desc))
+        if not options:
+            options = [discord.SelectOption(label="No aircraft configured", value="NONE")]
 
         super().__init__(placeholder="Choose an aircraft type...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        plane_type = self.values[0]
+        if self.values[0] == "NONE":
+            await interaction.response.send_message("No aircraft types are configured.", ephemeral=True)
+            return
+        await self.on_pick(interaction, self.values[0])
+
+    async def on_pick(self, interaction: discord.Interaction, plane_type: str):
+        raise NotImplementedError
+
+
+class CheckoutAircraftSelect(AircraftSelect):
+    async def on_pick(self, interaction: discord.Interaction, plane_type: str):
         view = MissionSelectView(self.depot_code, plane_type)
         await interaction.response.send_message(f"Select the mission for **{plane_type}**:", view=view, ephemeral=True)
 
 
+class StockAircraftSelect(AircraftSelect):
+    async def on_pick(self, interaction: discord.Interaction, plane_type: str):
+        await interaction.response.send_modal(AddStockModal(self.depot_code, plane_type))
+
+
 class PlaneSelectView(BaseView):
+    """Aircraft choice for taking a plane out of a depot."""
     def __init__(self, depot_code: str):
         super().__init__(timeout=180)
-        self.add_item(PlaneSelect(depot_code))
+        self.add_item(CheckoutAircraftSelect(depot_code))
+
+
+class StockSelectView(BaseView):
+    """Aircraft choice for adding stock to a depot."""
+    def __init__(self, depot_code: str):
+        super().__init__(timeout=180)
+        self.add_item(StockAircraftSelect(depot_code))
 
 
 # ==================== DEPOT SELECTS & CONTROL PANEL ====================
@@ -364,7 +380,9 @@ class DepotSelect(ui.Select):
 
         code = self.values[0]
         if self.action == "add_stock":
-            await interaction.response.send_modal(AddStockModal(code))
+            await interaction.response.send_message(
+                "Select the aircraft to add:", view=StockSelectView(code), ephemeral=True
+            )
         elif self.action == "view_details":
             depot = AirfieldRepository.get_depot(code)
             stock = AirfieldRepository.get_stock_summary(code)

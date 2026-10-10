@@ -98,6 +98,16 @@ class AirfieldRepository:
             return cursor.fetchone()
 
     @staticmethod
+    def get_aircraft_types():
+        """The predetermined aircraft list (active only), in display order. `label` is what planes store."""
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name, role, label FROM aircraft_types WHERE active = 1 ORDER BY sort_order, id"
+            )
+            return cursor.fetchall()
+
+    @staticmethod
     def get_depot_by_id(airfield_id: int):
         with get_db() as conn:
             cursor = conn.cursor()
