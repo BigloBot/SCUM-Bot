@@ -51,7 +51,7 @@ class CreateDepotModal(ui.Modal, title="Create Airfield Depot"):
         duplicate = AirfieldRepository.check_duplicate(name, code)
         if duplicate:
             await interaction.response.send_message(
-                f"❌ A depot with that {'name' if duplicate == 'name' else 'code'} already exists in this war!",
+                f"❌ A depot with that {'name' if duplicate == 'name' else 'code'} already exists and is active in this war!",
                 ephemeral=True
             )
             return

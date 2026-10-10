@@ -25,14 +25,14 @@ class AirfieldRepository:
 
     @staticmethod
     def check_duplicate(name: str, code: str) -> str | None:
-        """Checks if a depot name or passcode already exists within the current war (any status, matching the DB constraint)."""
+        """Checks if a depot name or passcode already exists active within the current war."""
         war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
                 SELECT name, code FROM airfields
-                WHERE (name = ? OR code = ?) AND war_number = ?
+                WHERE (name = ? OR code = ?) AND war_number = ? AND status = 'ACTIVE'
                 """,
                 (name.upper(), code.upper(), war_number)
             )
@@ -49,7 +49,13 @@ class AirfieldRepository:
             war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
             conn.execute(
-                "UPDATE airfields SET status = 'DELETED' WHERE code = ? AND war_number = ?",
+                "UPDATE airfields SET status = 'DELETED' WHERE code = ? AND war_number = ? AND status = 'ACTIVE'",
+                (code.upper(), war_number)
+            )
+            # Retire leftover stock so it can't resurface if the code is reused by a new depot.
+            conn.execute(
+                "UPDATE plane_instances SET status = 'DEPOT_DELETED' "
+                "WHERE airfield_code = ? AND war_number = ? AND status = 'IN_STOCK'",
                 (code.upper(), war_number)
             )
             conn.commit()
@@ -80,7 +86,8 @@ class AirfieldRepository:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT code, name, location, thread_id, war_number, status FROM airfields WHERE code = ? AND war_number = ?",
+                "SELECT code, name, location, thread_id, war_number, status FROM airfields "
+                "WHERE code = ? AND war_number = ? ORDER BY (status = 'ACTIVE') DESC, id DESC LIMIT 1",
                 (code.upper(), war_number)
             )
             return cursor.fetchone()
