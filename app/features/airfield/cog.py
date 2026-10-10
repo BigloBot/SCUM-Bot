@@ -36,7 +36,7 @@ def register(bot: commands.Bot):
     @commands.guild_only()
     async def scum(ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await ctx.send("Try `/scum airfield`.", ephemeral=True)
+            await ctx.send("Try `/scum airfield` or `/scum war`.", ephemeral=True)
 
     @scum.group(name="airfield", description="Airfield depots, stockpiles and flights.")
     async def airfield(ctx: commands.Context):
@@ -95,14 +95,49 @@ def register(bot: commands.Bot):
             ephemeral=True
         )
 
+    # ==================== WAR CONTROL ====================
+    @scum.command(name="war", description="Show the active war, or switch to another war (admins only).")
+    @app_commands.describe(number="War number to switch to. Leave empty to show the active war.")
+    @commands.guild_only()
+    @has_airfield_admin()
+    async def war(ctx: commands.Context, number: Optional[int] = None):
+        if number is None:
+            await ctx.send(f"The active war is **War {AirfieldRepository.get_active_war()}**.", ephemeral=True)
+            return
+
+        if number < 1:
+            await ctx.send("The war number must be 1 or higher.", ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+        AirfieldRepository.set_active_war(number)
+
+        # Every depot thread is brought in line with the new active war, so switching back to an
+        # earlier war reopens exactly that war's threads and locks all the others.
+        counts = await sync_war_threads(ctx.guild, number)
+        message = (
+            f"Active war set to **War {number}**. "
+            f"Depot threads synced: {counts['changed']} updated, {counts['unchanged']} already correct."
+        )
+        problems = []
+        if counts["failed"]:
+            problems.append(f"{counts['failed']} could not be updated (check the bot's Manage Threads permission)")
+        if counts["missing"]:
+            problems.append(f"{counts['missing']} no longer exist in Discord")
+        if problems:
+            message += "\nNote: " + "; ".join(problems) + "."
+
+        # Keep the active war shown on the permanent controls message current.
+        await refresh_control_panel(ctx.guild)
+        await ctx.send(message, ephemeral=True)
+
     # ==================== ADMIN CONFIG ====================
     @airfield.command(name="config", description="View or change airfield settings (admins only).")
     @app_commands.describe(
         forum="Forum channel where depot threads are created.",
         controls="Channel that holds the permanent control panel message.",
         aviator_role="Role allowed to use the airfield controls and commands.",
-        admin_role="Role that counts as airfield admin, e.g. verified officer (server owner only).",
-        war="Active war number. Locks other wars' depot threads and reopens this war's."
+        admin_role="Role that counts as airfield admin, e.g. verified officer (server owner only)."
     )
     @commands.guild_only()
     @has_airfield_admin()
@@ -111,13 +146,12 @@ def register(bot: commands.Bot):
         forum: Optional[discord.ForumChannel] = None,
         controls: Optional[discord.TextChannel] = None,
         aviator_role: Optional[discord.Role] = None,
-        admin_role: Optional[discord.Role] = None,
-        war: Optional[int] = None
+        admin_role: Optional[discord.Role] = None
     ):
         no_pings = discord.AllowedMentions.none()
 
         # With no options, just show the current settings.
-        if all(option is None for option in (forum, controls, aviator_role, admin_role, war)):
+        if all(option is None for option in (forum, controls, aviator_role, admin_role)):
             forum_id = AirfieldRepository.get_config("forum_channel_id")
             controls_id = AirfieldRepository.get_config("controls_channel_id")
             aviator_id = AirfieldRepository.get_config("aviator_role_id")
@@ -128,7 +162,7 @@ def register(bot: commands.Bot):
                 f"Controls channel: {f'<#{controls_id}>' if controls_id else 'not set'}\n"
                 f"Admin role: {f'<@&{admin_id}>' if admin_id else 'not set (Discord administrators only)'}\n"
                 f"Aviator role: {f'<@&{aviator_id}>' if aviator_id else 'not set (admins only)'}\n"
-                f"Active war: **War {AirfieldRepository.get_active_war()}**",
+                f"Active war: **War {AirfieldRepository.get_active_war()}** (change it with `/scum war`)",
                 ephemeral=True,
                 allowed_mentions=no_pings
             )
@@ -143,10 +177,6 @@ def register(bot: commands.Bot):
             if admin_role.is_default():
                 await ctx.send("The admin role can't be @everyone.", ephemeral=True)
                 return
-
-        if war is not None and war < 1:
-            await ctx.send("The war number must be 1 or higher.", ephemeral=True)
-            return
 
         await ctx.defer(ephemeral=True)
         changes = []
@@ -163,34 +193,15 @@ def register(bot: commands.Bot):
             AirfieldRepository.set_config("aviator_role_id", str(aviator_role.id))
             changes.append(f"Aviator role set to {aviator_role.mention}.")
 
-        if war is not None:
-            AirfieldRepository.set_active_war(war)
-            # Every depot thread is brought in line with the new active war, so switching back to an
-            # earlier war reopens exactly that war's threads and locks all the others.
-            counts = await sync_war_threads(ctx.guild, war)
-            line = (
-                f"Active war set to **War {war}**. "
-                f"Depot threads synced: {counts['changed']} updated, {counts['unchanged']} already correct."
-            )
-            problems = []
-            if counts["failed"]:
-                problems.append(f"{counts['failed']} could not be updated (check the bot's Manage Threads permission)")
-            if counts["missing"]:
-                problems.append(f"{counts['missing']} no longer exist in Discord")
-            if problems:
-                line += "\nNote: " + "; ".join(problems) + "."
-            changes.append(line)
-
-        # Post or refresh the permanent controls message (also keeps the active war shown on it current).
-        if controls is not None or war is not None:
+        # Post (or move) the permanent controls message.
+        if controls is not None:
             result = await refresh_control_panel(ctx.guild, channel=controls)
-            if controls is not None:
-                if result == "failed":
-                    changes.append(
-                        f"Couldn't post the controls message in {controls.mention}. "
-                        "Check that the bot can view the channel, send messages and embed links there."
-                    )
-                else:
-                    changes.append(f"Controls message {result} in {controls.mention}.")
+            if result == "failed":
+                changes.append(
+                    f"Couldn't post the controls message in {controls.mention}. "
+                    "Check that the bot can view the channel, send messages and embed links there."
+                )
+            else:
+                changes.append(f"Controls message {result} in {controls.mention}.")
 
         await ctx.send("\n".join(changes), ephemeral=True, allowed_mentions=no_pings)
