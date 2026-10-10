@@ -3,12 +3,14 @@ from typing import Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
+from app.features.airfield.panel import refresh_control_panel
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import sync_war_threads
 from app.features.airfield.views import (
     DepotFlightView,
     DepotManagementView,
-    FlightReturnStatusView
+    FlightReturnStatusView,
+    member_can_fly
 )
 
 def has_aviator_role():
@@ -17,14 +19,7 @@ def has_aviator_role():
     Until an aviator role is set, only administrators can use them.
     """
     async def predicate(ctx: commands.Context):
-        if ctx.guild is None:
-            return False
-        if ctx.author.guild_permissions.administrator:
-            return True
-        role_id = AirfieldRepository.get_config("aviator_role_id")
-        if not role_id:
-            return False
-        return any(role.id == int(role_id) for role in ctx.author.roles)
+        return ctx.guild is not None and member_can_fly(ctx.author)
     return commands.check(predicate)
 
 def register(bot: commands.Bot):
@@ -43,7 +38,8 @@ def register(bot: commands.Bot):
             await ctx.send("Try `/scum airfield panel`, `flight`, or `return`.", ephemeral=True)
 
     # ==================== AVIATOR COMMANDS ====================
-    @airfield.command(name="panel", description="Open the depot control panel.")
+    # The same controls live permanently in the controls channel (see `config`); these are shortcuts.
+    @airfield.command(name="panel", description="Open the airfield control panel.")
     @commands.guild_only()
     @has_aviator_role()
     async def panel(ctx: commands.Context):
@@ -62,14 +58,11 @@ def register(bot: commands.Bot):
 
         war = AirfieldRepository.get_active_war()
         embed = discord.Embed(
-            title="Depot Control Panel",
-            description=(
-                f"Active war: **War {war}**\n"
-                "Create depots, add aircraft stock, view stockpiles, or delete depots."
-            ),
+            title="Airfield Control Panel",
+            description=f"Active war: **War {war}**",
             color=discord.Color.blue()
         )
-        await ctx.send(embed=embed, view=DepotManagementView(forum_channel), ephemeral=True)
+        await ctx.send(embed=embed, view=DepotManagementView(), ephemeral=True)
 
     @airfield.command(name="flight", description="Take an aircraft out of a depot.")
     @commands.guild_only()
@@ -100,7 +93,8 @@ def register(bot: commands.Bot):
     @airfield.command(name="config", description="View or change airfield settings (admins only).")
     @app_commands.describe(
         forum="Forum channel where depot threads are created.",
-        role="Aviator role allowed to run flight commands.",
+        controls="Channel that holds the permanent control panel message.",
+        role="Aviator role allowed to use the airfield controls and commands.",
         war="Active war number. Locks other wars' depot threads and reopens this war's."
     )
     @commands.guild_only()
@@ -108,18 +102,21 @@ def register(bot: commands.Bot):
     async def config(
         ctx: commands.Context,
         forum: Optional[discord.ForumChannel] = None,
+        controls: Optional[discord.TextChannel] = None,
         role: Optional[discord.Role] = None,
         war: Optional[int] = None
     ):
         no_pings = discord.AllowedMentions.none()
 
         # With no options, just show the current settings.
-        if forum is None and role is None and war is None:
+        if forum is None and controls is None and role is None and war is None:
             forum_id = AirfieldRepository.get_config("forum_channel_id")
+            controls_id = AirfieldRepository.get_config("controls_channel_id")
             role_id = AirfieldRepository.get_config("aviator_role_id")
             await ctx.send(
                 "**Airfield settings**\n"
                 f"Forum: {f'<#{forum_id}>' if forum_id else 'not set'}\n"
+                f"Controls channel: {f'<#{controls_id}>' if controls_id else 'not set'}\n"
                 f"Aviator role: {f'<@&{role_id}>' if role_id else 'not set (admins only)'}\n"
                 f"Active war: **War {AirfieldRepository.get_active_war()}**",
                 ephemeral=True,
@@ -159,5 +156,17 @@ def register(bot: commands.Bot):
             if problems:
                 line += "\nNote: " + "; ".join(problems) + "."
             changes.append(line)
+
+        # Post or refresh the permanent controls message (also keeps the active war shown on it current).
+        if controls is not None or war is not None:
+            result = await refresh_control_panel(ctx.guild, channel=controls)
+            if controls is not None:
+                if result == "failed":
+                    changes.append(
+                        f"Couldn't post the controls message in {controls.mention}. "
+                        "Check that the bot can view the channel, send messages and embed links there."
+                    )
+                else:
+                    changes.append(f"Controls message {result} in {controls.mention}.")
 
         await ctx.send("\n".join(changes), ephemeral=True, allowed_mentions=no_pings)

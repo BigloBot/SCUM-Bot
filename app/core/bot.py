@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from app.core.config import Config
 from app.features.airfield.cog import register
+from app.features.airfield.views import DepotManagementView
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,8 @@ class ScumBot(commands.Bot):
         register(self)
 
     async def setup_hook(self):
-        """Syncs application command tree globally with Discord on boot."""
+        """Re-registers the persistent control panel buttons, then syncs the command tree with Discord."""
+        self.add_view(DepotManagementView())
         await self.tree.sync()
         print("[+] Discord command tree synced successfully.")
 

@@ -1,0 +1,71 @@
+import logging
+import discord
+from app.features.airfield.repository import AirfieldRepository
+
+logger = logging.getLogger(__name__)
+
+
+def build_panel_embed() -> discord.Embed:
+    war = AirfieldRepository.get_active_war()
+    return discord.Embed(
+        title="Airfield Control Panel",
+        description=(
+            f"Active war: **War {war}**\n\n"
+            "Take aircraft out, log returns, and manage depots and stockpiles with the buttons below. "
+            "Replies are only visible to you."
+        ),
+        color=discord.Color.blue()
+    )
+
+
+async def _delete_old_message(guild: discord.Guild, channel_id: str, message_id: str):
+    try:
+        channel = guild.get_channel(int(channel_id))
+        if channel is not None:
+            await channel.get_partial_message(int(message_id)).delete()
+    except Exception:
+        pass  # already gone, or the bot can no longer reach it
+
+
+async def refresh_control_panel(guild: discord.Guild, channel: discord.TextChannel = None) -> str:
+    """
+    Keeps the one permanent controls message up to date.
+      - `channel` given: that becomes the controls channel (the old message is removed if it was elsewhere).
+      - `channel` omitted: the stored channel is used (e.g. to refresh the active war shown).
+    The existing message is edited in place; if it was deleted, a new one is posted.
+    Returns 'posted', 'updated', 'no_channel' or 'failed'.
+    """
+    from app.features.airfield.views import DepotManagementView  # imported here to keep modules decoupled
+
+    old_channel_id = AirfieldRepository.get_config("controls_channel_id")
+    old_message_id = AirfieldRepository.get_config("controls_message_id")
+
+    target = channel
+    if target is None and old_channel_id:
+        stored = guild.get_channel(int(old_channel_id))
+        target = stored if isinstance(stored, discord.TextChannel) else None
+    if target is None:
+        return "no_channel"
+
+    moved = bool(old_channel_id) and int(old_channel_id) != target.id
+    if moved and old_message_id:
+        await _delete_old_message(guild, old_channel_id, old_message_id)
+        old_message_id = None
+
+    embed = build_panel_embed()
+    view = DepotManagementView()
+    try:
+        if old_message_id and not moved:
+            try:
+                await target.get_partial_message(int(old_message_id)).edit(embed=embed, view=view)
+                return "updated"
+            except discord.NotFound:
+                pass  # the message was deleted; post a fresh one below
+        message = await target.send(embed=embed, view=view)
+    except Exception as e:
+        logger.error(f"Failed to post the controls message in channel {target.id}: {e}")
+        return "failed"
+
+    AirfieldRepository.set_config("controls_channel_id", str(target.id))
+    AirfieldRepository.set_config("controls_message_id", str(message.id))
+    return "posted"

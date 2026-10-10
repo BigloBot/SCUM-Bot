@@ -29,6 +29,16 @@ INTERNAL_ERROR ="An internal error occurred. Please try again, and let an admin 
 
 # ==================== SHARED HELPERS ====================
 
+def member_can_fly(member) -> bool:
+    """Admins, or members holding the configured aviator role (admins only until a role is set)."""
+    if not isinstance(member, discord.Member):
+        return False
+    if member.guild_permissions.administrator:
+        return True
+    role_id = AirfieldRepository.get_config("aviator_role_id")
+    return bool(role_id) and any(role.id == int(role_id) for role in member.roles)
+
+
 async def send_internal_error(interaction: discord.Interaction):
     """Generic error for the user; the details only go to the bot's logs."""
     try:
@@ -422,27 +432,58 @@ class DepotSelect(ui.Select):
 
 
 class DepotManagementView(BaseView):
-    def __init__(self, forum_channel: discord.ForumChannel):
+    """
+    The airfield control panel. Persistent: fixed custom_ids and no timeout, so the buttons on the
+    permanent controls message keep working across bot restarts (registered in the bot's setup_hook).
+    """
+    def __init__(self):
         super().__init__(timeout=None)
-        self.forum_channel = forum_channel
 
-    @ui.button(label="Create Depot", style=discord.ButtonStyle.green, emoji="➕")
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # The controls message lives in a channel others may be able to read, so check on every click.
+        if member_can_fly(interaction.user):
+            return True
+        await interaction.response.send_message("You don't have permission to use these controls.", ephemeral=True)
+        return False
+
+    @ui.button(label="Take Out Aircraft", style=discord.ButtonStyle.green, custom_id="scum:flight", row=0)
+    async def take_out(self, interaction: discord.Interaction, button: ui.Button):
+        if not AirfieldRepository.get_airfields():
+            await interaction.response.send_message("There are no depots in the active war yet.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Select the depot you are taking an aircraft from:", view=DepotFlightView(), ephemeral=True
+        )
+
+    @ui.button(label="Log Return", style=discord.ButtonStyle.primary, custom_id="scum:return", row=0)
+    async def log_return(self, interaction: discord.Interaction, button: ui.Button):
+        active_flight = AirfieldRepository.get_user_active_flight(str(interaction.user.id))
+        if not active_flight:
+            await interaction.response.send_message("You don't have an active flight to log.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"Logging your **{active_flight['plane_type']}** flight. Select the outcome to open the kill sheet:",
+            view=FlightReturnStatusView(active_flight),
+            ephemeral=True
+        )
+
+    @ui.button(label="Create Depot", style=discord.ButtonStyle.secondary, custom_id="scum:create_depot", row=1)
     async def create_depot(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(CreateDepotModal())
 
-    @ui.button(label="Add Stock", style=discord.ButtonStyle.primary, emoji="📦")
+    @ui.button(label="Add Stock", style=discord.ButtonStyle.secondary, custom_id="scum:add_stock", row=1)
     async def add_stock(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(DepotSelect("add_stock"))
         await interaction.response.send_message("Select the depot to add stock to:", view=view, ephemeral=True)
 
-    @ui.button(label="View Depots", style=discord.ButtonStyle.secondary, emoji="📋")
+    @ui.button(label="View Depots", style=discord.ButtonStyle.secondary, custom_id="scum:view_depots", row=1)
     async def view_depots(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(DepotSelect("view_details"))
         await interaction.response.send_message("Select the depot to view:", view=view, ephemeral=True)
 
-    @ui.button(label="Delete Depot", style=discord.ButtonStyle.danger, emoji="🗑️")
+    @ui.button(label="Delete Depot", style=discord.ButtonStyle.danger, custom_id="scum:delete_depot", row=1)
     async def delete_depot(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(DepotSelect("delete"))
