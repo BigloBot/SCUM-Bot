@@ -1,0 +1,9 @@
+# Environment variables
+.env
+
+# Python compilation and cache
+__pycache__/
+*.pyc
+
+# Local SQLite database files (let Docker volumes handle persistence)
+data/
