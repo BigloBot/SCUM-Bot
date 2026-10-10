@@ -25,14 +25,14 @@ class AirfieldRepository:
 
     @staticmethod
     def check_duplicate(name: str, code: str) -> str | None:
-        """Checks if a depot name or passcode already exists active within the current war."""
+        """Checks if a depot name or passcode already exists within the current war (any status, matching the DB constraint)."""
         war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
                 SELECT name, code FROM airfields
-                WHERE (name = ? OR code = ?) AND war_number = ? AND status = 'ACTIVE'
+                WHERE (name = ? OR code = ?) AND war_number = ?
                 """,
                 (name.upper(), code.upper(), war_number)
             )
@@ -44,9 +44,14 @@ class AirfieldRepository:
         return None
 
     @staticmethod
-    def delete_airfield(code: str):
+    def delete_airfield(code: str, war_number: int = None):
+        if war_number is None:
+            war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
-            conn.execute("UPDATE airfields SET status = 'DELETED' WHERE code = ?", (code.upper(),))
+            conn.execute(
+                "UPDATE airfields SET status = 'DELETED' WHERE code = ? AND war_number = ?",
+                (code.upper(), war_number)
+            )
             conn.commit()
 
     @staticmethod
@@ -69,10 +74,15 @@ class AirfieldRepository:
             return cursor.fetchall()
 
     @staticmethod
-    def get_depot(code: str):
+    def get_depot(code: str, war_number: int = None):
+        if war_number is None:
+            war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT code, name, location, thread_id, war_number, status FROM airfields WHERE code = ?", (code.upper(),))
+            cursor.execute(
+                "SELECT code, name, location, thread_id, war_number, status FROM airfields WHERE code = ? AND war_number = ?",
+                (code.upper(), war_number)
+            )
             return cursor.fetchone()
 
     @staticmethod
@@ -128,7 +138,7 @@ class AirfieldRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, airfield_code, plane_type, usecase
+                SELECT id, war_number, airfield_code, plane_type, usecase
                 FROM plane_instances
                 WHERE removed_by = ? AND status = 'CHECKED_OUT'
                 LIMIT 1

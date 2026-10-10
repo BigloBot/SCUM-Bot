@@ -26,8 +26,8 @@ MISSION_PRESETS = [
 ]
 
 # Helper function to auto-log flight events in forum threads
-async def log_to_depot_thread(guild: discord.Guild, depot_code: str, message: str):
-    depot = AirfieldRepository.get_depot(depot_code)
+async def log_to_depot_thread(guild: discord.Guild, depot_code: str, message: str, war_number: int = None):
+    depot = AirfieldRepository.get_depot(depot_code, war_number)
     if depot and depot["thread_id"]:
         try:
             thread = guild.get_channel(int(depot["thread_id"]))
@@ -51,7 +51,7 @@ class CreateDepotModal(ui.Modal, title="Create Airfield Depot"):
         duplicate = AirfieldRepository.check_duplicate(name, code)
         if duplicate:
             await interaction.response.send_message(
-                f"❌ A depot with that {'name' if duplicate == 'name' else 'code'} already exists and is active in this war!",
+                f"❌ A depot with that {'name' if duplicate == 'name' else 'code'} already exists in this war!",
                 ephemeral=True
             )
             return
@@ -197,7 +197,7 @@ class StructuredKillModal(ui.Modal, title="Sortie Kill Sheet"):
         )
 
         # Log return event in the depot thread
-        if "airfield_code" in completed and completed["airfield_code"]:
+        if completed["airfield_code"]:
             log_msg = (
                 f"{status_emoji} **Sortie Completed:** {interaction.user.mention} logged flight return.\n"
                 f"• Aircraft: **{self.plane_type}**\n"
@@ -205,7 +205,7 @@ class StructuredKillModal(ui.Modal, title="Sortie Kill Sheet"):
                 f"• Air Kills: **{air_summary}**\n"
                 f"• Notes: *{extra_notes or 'None'}*"
             )
-            await log_to_depot_thread(interaction.guild, completed["airfield_code"], log_msg)
+            await log_to_depot_thread(interaction.guild, completed["airfield_code"], log_msg, completed["war_number"])
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         logger.error(f"Exception in StructuredKillModal: {error}")
