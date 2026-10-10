@@ -11,6 +11,15 @@ class AirfieldRepository:
         AirfieldRepository.set_config("active_war", str(war_number))
 
     @staticmethod
+    def _active_depot_id(conn, airfield_code: str, war_number: int) -> int | None:
+        """Resolves a depot code to the id of the ACTIVE airfield row in the given war."""
+        row = conn.execute(
+            "SELECT id FROM airfields WHERE code = ? AND war_number = ? AND status = 'ACTIVE'",
+            (airfield_code.upper(), war_number)
+        ).fetchone()
+        return row["id"] if row else None
+
+    @staticmethod
     def add_airfield(name: str, code: str, location: str, thread_id: str = None):
         war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
@@ -45,17 +54,12 @@ class AirfieldRepository:
 
     @staticmethod
     def delete_airfield(code: str, war_number: int = None):
+        """Soft delete only: the row and all of its plane history are kept for reporting."""
         if war_number is None:
             war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
             conn.execute(
                 "UPDATE airfields SET status = 'DELETED' WHERE code = ? AND war_number = ? AND status = 'ACTIVE'",
-                (code.upper(), war_number)
-            )
-            # Retire leftover stock so it can't resurface if the code is reused by a new depot.
-            conn.execute(
-                "UPDATE plane_instances SET status = 'DEPOT_DELETED' "
-                "WHERE airfield_code = ? AND war_number = ? AND status = 'IN_STOCK'",
                 (code.upper(), war_number)
             )
             conn.commit()
@@ -67,7 +71,7 @@ class AirfieldRepository:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT code, name, location, thread_id, war_number, status FROM airfields WHERE war_number = ? AND status = ? ORDER BY name ASC",
+                "SELECT id, code, name, location, thread_id, war_number, status FROM airfields WHERE war_number = ? AND status = ? ORDER BY name ASC",
                 (war_number, status)
             )
             return cursor.fetchall()
@@ -76,35 +80,49 @@ class AirfieldRepository:
     def get_all_war_airfields():
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT code, name, location, thread_id, war_number, status FROM airfields")
+            cursor.execute("SELECT id, code, name, location, thread_id, war_number, status FROM airfields")
             return cursor.fetchall()
 
     @staticmethod
     def get_depot(code: str, war_number: int = None):
+        """Looks a depot up by code within a war, preferring the ACTIVE row over deleted ones."""
         if war_number is None:
             war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT code, name, location, thread_id, war_number, status FROM airfields "
+                "SELECT id, code, name, location, thread_id, war_number, status FROM airfields "
                 "WHERE code = ? AND war_number = ? ORDER BY (status = 'ACTIVE') DESC, id DESC LIMIT 1",
                 (code.upper(), war_number)
             )
             return cursor.fetchone()
 
     @staticmethod
-    def add_plane(airfield_code: str, plane_type: str, user_id: str):
-        war_number = AirfieldRepository.get_active_war()
+    def get_depot_by_id(airfield_id: int):
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
+                "SELECT id, code, name, location, thread_id, war_number, status FROM airfields WHERE id = ?",
+                (airfield_id,)
+            )
+            return cursor.fetchone()
+
+    @staticmethod
+    def add_plane(airfield_code: str, plane_type: str, user_id: str) -> bool:
+        war_number = AirfieldRepository.get_active_war()
+        with get_db() as conn:
+            airfield_id = AirfieldRepository._active_depot_id(conn, airfield_code, war_number)
+            if airfield_id is None:
+                return False
+            conn.execute(
                 """
-                INSERT INTO plane_instances (war_number, airfield_code, plane_type, added_by, status)
+                INSERT INTO plane_instances (war_number, airfield_id, plane_type, added_by, status)
                 VALUES (?, ?, ?, ?, 'IN_STOCK')
                 """,
-                (war_number, airfield_code.upper(), plane_type, user_id)
+                (war_number, airfield_id, plane_type, user_id)
             )
             conn.commit()
+            return True
 
     @staticmethod
     def get_available_planes(airfield_code: str):
@@ -113,10 +131,11 @@ class AirfieldRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT plane_type, COUNT(*) as count
-                FROM plane_instances
-                WHERE war_number = ? AND airfield_code = ? AND status = 'IN_STOCK'
-                GROUP BY plane_type
+                SELECT p.plane_type, COUNT(*) as count
+                FROM plane_instances p
+                JOIN airfields a ON a.id = p.airfield_id
+                WHERE a.war_number = ? AND a.code = ? AND a.status = 'ACTIVE' AND p.status = 'IN_STOCK'
+                GROUP BY p.plane_type
                 HAVING count > 0
                 """,
                 (war_number, airfield_code.upper())
@@ -130,10 +149,11 @@ class AirfieldRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT plane_type, COUNT(*) as count
-                FROM plane_instances
-                WHERE war_number = ? AND airfield_code = ? AND status = 'IN_STOCK'
-                GROUP BY plane_type
+                SELECT p.plane_type, COUNT(*) as count
+                FROM plane_instances p
+                JOIN airfields a ON a.id = p.airfield_id
+                WHERE a.war_number = ? AND a.code = ? AND a.status = 'ACTIVE' AND p.status = 'IN_STOCK'
+                GROUP BY p.plane_type
                 """,
                 (war_number, airfield_code.upper())
             )
@@ -145,9 +165,10 @@ class AirfieldRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, war_number, airfield_code, plane_type, usecase
-                FROM plane_instances
-                WHERE removed_by = ? AND status = 'CHECKED_OUT'
+                SELECT p.id, p.war_number, p.airfield_id, a.code AS airfield_code, p.plane_type, p.usecase
+                FROM plane_instances p
+                JOIN airfields a ON a.id = p.airfield_id
+                WHERE p.removed_by = ? AND p.status = 'CHECKED_OUT'
                 LIMIT 1
                 """,
                 (str(user_id),)
@@ -161,14 +182,18 @@ class AirfieldRepository:
 
         war_number = AirfieldRepository.get_active_war()
         with get_db() as conn:
+            airfield_id = AirfieldRepository._active_depot_id(conn, airfield_code, war_number)
+            if airfield_id is None:
+                return False
+
             cursor = conn.cursor()
             cursor.execute(
                 """
                 SELECT id FROM plane_instances
-                WHERE war_number = ? AND airfield_code = ? AND plane_type = ? AND status = 'IN_STOCK'
+                WHERE airfield_id = ? AND plane_type = ? AND status = 'IN_STOCK'
                 LIMIT 1
                 """,
-                (war_number, airfield_code.upper(), plane_type)
+                (airfield_id, plane_type)
             )
             row = cursor.fetchone()
             if row:
@@ -184,10 +209,10 @@ class AirfieldRepository:
             else:
                 cursor.execute(
                     """
-                    INSERT INTO plane_instances (war_number, airfield_code, plane_type, added_by, status, usecase, removed_by)
+                    INSERT INTO plane_instances (war_number, airfield_id, plane_type, added_by, status, usecase, removed_by)
                     VALUES (?, ?, ?, 'UNREGISTERED', 'CHECKED_OUT', ?, ?)
                     """,
-                    (war_number, airfield_code.upper(), plane_type, usecase, str(user_id))
+                    (war_number, airfield_id, plane_type, usecase, str(user_id))
                 )
             conn.commit()
             return True

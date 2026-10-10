@@ -26,8 +26,13 @@ MISSION_PRESETS = [
 ]
 
 # Helper function to auto-log flight events in forum threads
-async def log_to_depot_thread(guild: discord.Guild, depot_code: str, message: str, war_number: int = None):
-    depot = AirfieldRepository.get_depot(depot_code, war_number)
+async def log_to_depot_thread(guild: discord.Guild, depot_code: str, message: str, airfield_id: int = None):
+    # An explicit airfield_id targets that exact depot row (e.g. the one a flight left from);
+    # otherwise the code resolves to the current war's depot.
+    if airfield_id is not None:
+        depot = AirfieldRepository.get_depot_by_id(airfield_id)
+    else:
+        depot = AirfieldRepository.get_depot(depot_code)
     if depot and depot["thread_id"]:
         try:
             thread = guild.get_channel(int(depot["thread_id"]))
@@ -96,7 +101,9 @@ class AddStockModal(ui.Modal, title="Add Aircraft Stock"):
         user_id = str(interaction.user.id)
 
         for _ in range(qty):
-            AirfieldRepository.add_plane(self.depot_code, plane, user_id)
+            if not AirfieldRepository.add_plane(self.depot_code, plane, user_id):
+                await interaction.response.send_message("❌ That depot is no longer active in the current war.", ephemeral=True)
+                return
 
         await interaction.response.send_message(f"✅ Added **{qty}x {plane}** to depot.", ephemeral=True)
         await log_to_depot_thread(
@@ -205,7 +212,7 @@ class StructuredKillModal(ui.Modal, title="Sortie Kill Sheet"):
                 f"• Air Kills: **{air_summary}**\n"
                 f"• Notes: *{extra_notes or 'None'}*"
             )
-            await log_to_depot_thread(interaction.guild, completed["airfield_code"], log_msg, completed["war_number"])
+            await log_to_depot_thread(interaction.guild, completed["airfield_code"], log_msg, completed["airfield_id"])
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         logger.error(f"Exception in StructuredKillModal: {error}")
