@@ -3,7 +3,7 @@ import re
 import discord
 from discord import ui
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.permissions import member_can_fly
+from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.threads import (
     close_depot_thread,
     depot_thread_title,
@@ -432,7 +432,7 @@ class DepotManagementView(BaseView):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         # The controls message lives in a channel others may be able to read, so check on every click.
-        if member_can_fly(interaction.user):
+        if can_use_airfield(interaction.user):
             return True
         await interaction.response.send_message("You don't have permission to use these controls.", ephemeral=True)
         return False

@@ -4,7 +4,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from app.features.airfield.panel import refresh_control_panel
-from app.features.airfield.permissions import is_airfield_admin, is_server_owner, member_can_fly
+from app.features.airfield.permissions import (
+    AIRFIELD_AVIATOR_ROLE_KEY,
+    can_use_airfield,
+    is_airfield_admin,
+    is_server_owner
+)
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import sync_war_threads
 from app.features.airfield.views import (
@@ -13,13 +18,13 @@ from app.features.airfield.views import (
     FlightReturnStatusView
 )
 
-def has_aviator_role():
+def has_airfield_access():
     """
-    Only server administrators and members with the configured aviator role may run flight commands.
+    Airfield commands: admins and holders of the airfield aviator role only (this role grants nothing elsewhere).
     Until an aviator role is set, only administrators can use them.
     """
     async def predicate(ctx: commands.Context):
-        return ctx.guild is not None and member_can_fly(ctx.author)
+        return ctx.guild is not None and can_use_airfield(ctx.author)
     return commands.check(predicate)
 
 def has_airfield_admin():
@@ -47,7 +52,7 @@ def register(bot: commands.Bot):
     # The same controls live permanently in the controls channel (see `config`); these are shortcuts.
     @airfield.command(name="panel", description="Open the airfield control panel.")
     @commands.guild_only()
-    @has_aviator_role()
+    @has_airfield_access()
     async def panel(ctx: commands.Context):
         forum_id = AirfieldRepository.get_config("forum_channel_id")
         if not forum_id:
@@ -72,7 +77,7 @@ def register(bot: commands.Bot):
 
     @airfield.command(name="flight", description="Take an aircraft out of a depot.")
     @commands.guild_only()
-    @has_aviator_role()
+    @has_airfield_access()
     async def flight(ctx: commands.Context):
         depots = AirfieldRepository.get_airfields()
         if not depots:
@@ -82,7 +87,7 @@ def register(bot: commands.Bot):
 
     @airfield.command(name="return", description="Log the outcome and air kills of your active flight.")
     @commands.guild_only()
-    @has_aviator_role()
+    @has_airfield_access()
     async def flight_return(ctx: commands.Context):
         active_flight = AirfieldRepository.get_user_active_flight(str(ctx.author.id))
         if not active_flight:
@@ -154,7 +159,7 @@ def register(bot: commands.Bot):
         if all(option is None for option in (forum, controls, aviator_role, admin_role)):
             forum_id = AirfieldRepository.get_config("forum_channel_id")
             controls_id = AirfieldRepository.get_config("controls_channel_id")
-            aviator_id = AirfieldRepository.get_config("aviator_role_id")
+            aviator_id = AirfieldRepository.get_config(AIRFIELD_AVIATOR_ROLE_KEY)
             admin_id = AirfieldRepository.get_config("admin_role_id")
             await ctx.send(
                 "**Airfield settings**\n"
@@ -190,7 +195,7 @@ def register(bot: commands.Bot):
             changes.append(f"Forum set to {forum.mention}.")
 
         if aviator_role is not None:
-            AirfieldRepository.set_config("aviator_role_id", str(aviator_role.id))
+            AirfieldRepository.set_config(AIRFIELD_AVIATOR_ROLE_KEY, str(aviator_role.id))
             changes.append(f"Aviator role set to {aviator_role.mention}.")
 
         # Post (or move) the permanent controls message.
