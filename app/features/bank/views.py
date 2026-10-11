@@ -28,10 +28,9 @@ class CreateStockpileModal(BaseModal, title="Add Officer Stockpile"):
             await interaction.response.send_message("The passcode must be exactly 6 digits (0-9).", ephemeral=True)
             return
 
-        duplicate = BankRepository.check_duplicate(name, code)
-        if duplicate:
+        if BankRepository.check_duplicate(name):
             await interaction.response.send_message(
-                f"A stockpile with that {duplicate} is already active in this war.", ephemeral=True
+                "A stockpile with that name is already active in this war.", ephemeral=True
             )
             return
 

@@ -3,11 +3,11 @@ from app.core.database import get_db
 
 class AirfieldRepository:
     @staticmethod
-    def _active_depot_id(conn, airfield_code: str, war_number: int) -> int | None:
-        """Resolves a depot code to the id of the ACTIVE airfield row in the given war."""
+    def _active_depot_id(conn, airfield_id: int, war_number: int) -> int | None:
+        """Confirms the depot is ACTIVE in the given war; the passcode is not unique, so depots are addressed by id."""
         row = conn.execute(
-            "SELECT id FROM airfields WHERE code = ? AND war_number = ? AND status = 'ACTIVE'",
-            (airfield_code.upper(), war_number)
+            "SELECT id FROM airfields WHERE id = ? AND war_number = ? AND status = 'ACTIVE'",
+            (airfield_id, war_number)
         ).fetchone()
         return row["id"] if row else None
 
@@ -25,35 +25,21 @@ class AirfieldRepository:
             conn.commit()
 
     @staticmethod
-    def check_duplicate(name: str, code: str) -> str | None:
-        """Checks if a depot name or passcode already exists active within the current war."""
+    def check_duplicate(name: str) -> bool:
+        """True if an ACTIVE depot in the current war already has this name. The passcode is not unique."""
         war_number = settings.get_active_war()
         with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT name, code FROM airfields
-                WHERE (name = ? OR code = ?) AND war_number = ? AND status = 'ACTIVE'
-                """,
-                (name.upper(), code.upper(), war_number)
-            )
-            row = cursor.fetchone()
-            if row:
-                if row["name"] == name.upper():
-                    return "name"
-                return "code"
-        return None
+            row = conn.execute(
+                "SELECT 1 FROM airfields WHERE name = ? AND war_number = ? AND status = 'ACTIVE'",
+                (name.upper(), war_number)
+            ).fetchone()
+        return row is not None
 
     @staticmethod
-    def delete_airfield(code: str, war_number: int = None):
+    def delete_airfield(airfield_id: int):
         """Soft delete only: the row and all of its plane history are kept for reporting."""
-        if war_number is None:
-            war_number = settings.get_active_war()
         with get_db() as conn:
-            conn.execute(
-                "UPDATE airfields SET status = 'DELETED' WHERE code = ? AND war_number = ? AND status = 'ACTIVE'",
-                (code.upper(), war_number)
-            )
+            conn.execute("UPDATE airfields SET status = 'DELETED' WHERE id = ? AND status = 'ACTIVE'", (airfield_id,))
             conn.commit()
 
     @staticmethod
@@ -76,20 +62,6 @@ class AirfieldRepository:
             return cursor.fetchall()
 
     @staticmethod
-    def get_depot(code: str, war_number: int = None):
-        """Looks a depot up by code within a war, preferring the ACTIVE row over deleted ones."""
-        if war_number is None:
-            war_number = settings.get_active_war()
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, code, name, location, thread_id, war_number, status FROM airfields "
-                "WHERE code = ? AND war_number = ? ORDER BY (status = 'ACTIVE') DESC, id DESC LIMIT 1",
-                (code.upper(), war_number)
-            )
-            return cursor.fetchone()
-
-    @staticmethod
     def get_aircraft_types():
         """The predetermined aircraft list (active only), in display order. `label` is what planes store."""
         with get_db() as conn:
@@ -110,10 +82,10 @@ class AirfieldRepository:
             return cursor.fetchone()
 
     @staticmethod
-    def add_plane(airfield_code: str, plane_type: str, user_id: str) -> bool:
+    def add_plane(airfield_id: int, plane_type: str, user_id: str) -> bool:
         war_number = settings.get_active_war()
         with get_db() as conn:
-            airfield_id = AirfieldRepository._active_depot_id(conn, airfield_code, war_number)
+            airfield_id = AirfieldRepository._active_depot_id(conn, airfield_id, war_number)
             if airfield_id is None:
                 return False
             conn.execute(
@@ -127,7 +99,7 @@ class AirfieldRepository:
             return True
 
     @staticmethod
-    def get_available_planes(airfield_code: str):
+    def get_available_planes(airfield_id: int):
         war_number = settings.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
@@ -136,16 +108,16 @@ class AirfieldRepository:
                 SELECT p.plane_type, COUNT(*) as count
                 FROM plane_instances p
                 JOIN airfields a ON a.id = p.airfield_id
-                WHERE a.war_number = ? AND a.code = ? AND a.status = 'ACTIVE' AND p.status = 'IN_STOCK'
+                WHERE a.war_number = ? AND a.id = ? AND a.status = 'ACTIVE' AND p.status = 'IN_STOCK'
                 GROUP BY p.plane_type
                 HAVING count > 0
                 """,
-                (war_number, airfield_code.upper())
+                (war_number, airfield_id)
             )
             return cursor.fetchall()
 
     @staticmethod
-    def get_stock_summary(airfield_code: str):
+    def get_stock_summary(airfield_id: int):
         war_number = settings.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
@@ -154,10 +126,10 @@ class AirfieldRepository:
                 SELECT p.plane_type, COUNT(*) as count
                 FROM plane_instances p
                 JOIN airfields a ON a.id = p.airfield_id
-                WHERE a.war_number = ? AND a.code = ? AND a.status = 'ACTIVE' AND p.status = 'IN_STOCK'
+                WHERE a.war_number = ? AND a.id = ? AND a.status = 'ACTIVE' AND p.status = 'IN_STOCK'
                 GROUP BY p.plane_type
                 """,
-                (war_number, airfield_code.upper())
+                (war_number, airfield_id)
             )
             return cursor.fetchall()
 
@@ -178,13 +150,13 @@ class AirfieldRepository:
             return cursor.fetchone()
 
     @staticmethod
-    def checkout_plane(airfield_code: str, plane_type: str, usecase: str, user_id: str) -> bool:
+    def checkout_plane(airfield_id: int, plane_type: str, usecase: str, user_id: str) -> bool:
         if AirfieldRepository.get_user_active_flight(user_id):
             return False
 
         war_number = settings.get_active_war()
         with get_db() as conn:
-            airfield_id = AirfieldRepository._active_depot_id(conn, airfield_code, war_number)
+            airfield_id = AirfieldRepository._active_depot_id(conn, airfield_id, war_number)
             if airfield_id is None:
                 return False
 
@@ -225,15 +197,10 @@ class AirfieldRepository:
         if not flight:
             return None
 
-        plane_id = flight["id"]
         with get_db() as conn:
             conn.execute(
-                """
-                UPDATE plane_instances
-                SET status = ?, kills = ?, target_killed = ?
-                WHERE id = ?
-                """,
-                (status, kills, target_killed, plane_id)
+                "UPDATE plane_instances SET status = ?, kills = ?, target_killed = ? WHERE id = ?",
+                (status, kills, target_killed, flight["id"])
             )
             conn.commit()
         return flight

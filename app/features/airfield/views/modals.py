@@ -21,7 +21,7 @@ class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.depot_name.value.strip()
-        code = self.depot_code.value.strip()
+        code = self.airfield_id.value.strip()
         location = self.depot_location.value.strip()
 
         if not name or not location:
@@ -31,9 +31,8 @@ class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
             await interaction.send("The passcode must be exactly 6 digits (0-9).")
             return
 
-        duplicate = AirfieldRepository.check_duplicate(name, code)
-        if duplicate:
-            await interaction.send(f"A depot with that {duplicate} is already active in this war.")
+        if AirfieldRepository.check_duplicate(name):
+            await interaction.send("A depot with that name is already active in this war.")
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -65,9 +64,9 @@ class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
 class AddStockModal(BaseModal, title="Add Aircraft Stock"):
     quantity = ui.TextInput(label="Quantity", placeholder="1", default="1", required=True, max_length=3)
 
-    def __init__(self, depot_code: str, plane_type: str):
+    def __init__(self, airfield_id: int, plane_type: str):
         super().__init__(title=f"Add {plane_type}"[:45])
-        self.depot_code = depot_code
+        self.airfield_id = airfield_id
         self.plane_type = plane_type
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -83,14 +82,14 @@ class AddStockModal(BaseModal, title="Add Aircraft Stock"):
         user_id = str(interaction.user.id)
 
         for _ in range(qty):
-            if not AirfieldRepository.add_plane(self.depot_code, plane, user_id):
+            if not AirfieldRepository.add_plane(self.airfield_id, plane, user_id):
                 await interaction.send("That depot is no longer active in the current war.")
                 return
 
         await interaction.send(f"Added **{qty}x {plane}** to the stockpile.")
         await log_to_depot_thread(
             interaction.guild,
-            self.depot_code,
+            self.airfield_id,
             f"📦 {interaction.user.mention} has added **{qty}x {plane}** to the stockpile."
         )
 
@@ -98,13 +97,13 @@ class AddStockModal(BaseModal, title="Add Aircraft Stock"):
 class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission"):
     usecase = ui.TextInput(label="Flight Purpose / Operation Details", placeholder="Describe custom operation...", required=True, style=discord.TextStyle.paragraph)
 
-    def __init__(self, depot_code: str, plane_type: str):
+    def __init__(self, airfield_id: int, plane_type: str):
         super().__init__()
-        self.depot_code = depot_code
+        self.airfield_id = airfield_id
         self.plane_type = plane_type
 
     async def on_submit(self, interaction: discord.Interaction):
-        await checkout_and_log(interaction, self.depot_code, self.plane_type, self.usecase.value.strip())
+        await checkout_and_log(interaction, self.airfield_id, self.plane_type, self.usecase.value.strip())
 
 
 class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
@@ -172,4 +171,4 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
             log_msg += f", taking down {kills_text} in the process." if kills_text else "."
         if extra_notes:
             log_msg += f"\nNotes: *{extra_notes}*"
-        await log_to_depot_thread(interaction.guild, completed["airfield_code"], log_msg, completed["airfield_id"])
+        await log_to_depot_thread(interaction.guild, completed["airfield_id"], log_msg)

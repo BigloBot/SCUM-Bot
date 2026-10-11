@@ -48,12 +48,11 @@ MISSION_PRESETS = [
     "Other"
 ]
 
-async def log_to_depot_thread(guild: discord.Guild, depot_code: str, message: str, airfield_id: int = None):
-    if airfield_id is not None:
-        depot = AirfieldRepository.get_depot_by_id(airfield_id)
-    else:
-        depot = AirfieldRepository.get_depot(depot_code)
-    await send_thread_message(guild, depot, message)
+async def log_to_depot_thread(guild: discord.Guild, airfield_id: int, message: str):
+    """Logs to the thread of exactly this depot (depots are addressed by id; passcodes are not unique)."""
+    depot = AirfieldRepository.get_depot_by_id(airfield_id)
+    if depot and depot["thread_id"]:
+        await send_thread_message(guild, depot["thread_id"], message)
 
 
 def article(noun: str) -> str:
@@ -67,9 +66,9 @@ def join_natural(parts: list[str]) -> str:
     return ", ".join(parts[:-1]) + f", and {parts[-1]}"
 
 
-async def checkout_and_log(interaction: discord.Interaction, depot_code: str, plane_type: str, mission: str):
+async def checkout_and_log(interaction: discord.Interaction, airfield_id: int, plane_type: str, mission: str):
     user_id = str(interaction.user.id)
-    success = AirfieldRepository.checkout_plane(depot_code, plane_type, mission, user_id)
+    success = AirfieldRepository.checkout_plane(airfield_id, plane_type, mission, user_id)
     if not success:
         await interaction.send(
             "You already have an active flight, or this depot is no longer active. "
@@ -77,15 +76,15 @@ async def checkout_and_log(interaction: discord.Interaction, depot_code: str, pl
         )
         return
 
-    depot = AirfieldRepository.get_depot(depot_code)
+    depot = AirfieldRepository.get_depot_by_id(airfield_id)
     location = depot["location"] if depot else "Unknown"
     await interaction.send(
-        f"Checked out **{plane_type}** from **{depot['name'] if depot else depot_code}** ({location}).\n"
+        f"Checked out **{plane_type}** from **{depot['name'] if depot else 'the depot'}** ({location}).\n"
         f"Mission: **{mission}**\n"
         f"Good hunting."
     )
     await log_to_depot_thread(
         interaction.guild,
-        depot_code,
+        airfield_id,
         f"🛫 {interaction.user.mention} has taken out {article(plane_type)} **{plane_type}** for **{mission}**."
     )

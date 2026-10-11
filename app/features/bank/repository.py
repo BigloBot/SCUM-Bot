@@ -19,20 +19,15 @@ class BankRepository:
             ).fetchall()
 
     @staticmethod
-    def check_duplicate(name: str, code: str) -> str | None:
-        """Checks if a stockpile name or passcode is already active within the current war."""
+    def check_duplicate(name: str) -> bool:
+        """True if an ACTIVE stockpile in the current war already has this name. The passcode is not unique."""
         war_number = settings.get_active_war()
         with get_db() as conn:
             row = conn.execute(
-                """
-                SELECT name, code FROM bank_stockpiles
-                WHERE (name = ? COLLATE NOCASE OR code = ?) AND war_number = ? AND status = 'ACTIVE'
-                """,
-                (name, code, war_number)
+                "SELECT 1 FROM bank_stockpiles WHERE name = ? COLLATE NOCASE AND war_number = ? AND status = 'ACTIVE'",
+                (name, war_number)
             ).fetchone()
-            if row:
-                return "name" if row["name"].lower() == name.lower() else "code"
-        return None
+        return row is not None
 
     @staticmethod
     def add_stockpile(name: str, code: str, location: str, user_id: str) -> int:

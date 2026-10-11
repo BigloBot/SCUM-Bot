@@ -15,14 +15,11 @@ def format_depot_thread_title(war_number: int, name: str, location: str) -> str:
     return title
 
 
-async def log_depot_event(guild: discord.Guild, depot_code_or_id: str | int, message: str) -> bool:
+async def log_depot_event(guild: discord.Guild, airfield_id: int, message: str) -> bool:
     """Business workflow to find depot data and dispatch thread log."""
-    if isinstance(depot_code_or_id, int):
-        depot = AirfieldRepository.get_depot_by_id(depot_code_or_id)
-    else:
-        depot = AirfieldRepository.get_depot(depot_code_or_id)
+    depot = AirfieldRepository.get_depot_by_id(airfield_id)
 
-    if not depot or not depot.get("thread_id"):
+    if not depot or not depot["thread_id"]:
         return False
 
     return await send_thread_message(guild, depot["thread_id"], message)
@@ -30,7 +27,7 @@ async def log_depot_event(guild: discord.Guild, depot_code_or_id: str | int, mes
 
 async def sync_war_threads(guild: discord.Guild, active_war: int) -> dict[str, int]:
     """Business rule: determine which depots should be open vs closed for a war."""
-    depots = [d for d in AirfieldRepository.get_all_war_airfields() if d.get("thread_id")]
+    depots = [dict(d) for d in AirfieldRepository.get_all_war_airfields() if d["thread_id"]]
     if not depots:
         return {"changed": 0, "unchanged": 0, "missing": 0, "failed": 0}
 
