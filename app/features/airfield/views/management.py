@@ -1,116 +1,32 @@
 import discord
 from discord import ui
-from app.core.permissions import is_admin
 from app.core.ui import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.views.modals import CreateDepotModal, StructuredKillModal
-from app.features.airfield.views.selects import DepotSelect
-
-def describe_report(report) -> str:
-    outcome = "returned" if report["status"] == "Returned" else "lost"
-    return f"**{report['plane_type']}**, {outcome}, **{report['kills']}** kills"
-
-
-async def send_fix_report(interaction: discord.Interaction, pilot: discord.abc.User = None):
-    """
-    Corrects a reported sortie. A pilot fixes their own most recent report. Admins can also pick any pilot
-    (or pass one in) and then choose which of that pilot's reports to fix.
-    """
-    admin = is_admin(interaction.user)
-    if pilot is not None and pilot.id != interaction.user.id and not admin:
-        await interaction.send("Only admins can fix another pilot's report.")
-        return
-
-    if admin and pilot is None:
-        view = BaseView()
-        view.add_item(AdminPilotSelect())
-        await interaction.send("Select the pilot whose report you want to fix:", view=view)
-        return
-
-    target = pilot or interaction.user
-    if target.id != interaction.user.id:
-        await send_report_choice(interaction, target)
-        return
-
-    report = AirfieldRepository.get_last_report(str(target.id))
-    if not report:
-        await interaction.send("You don't have a reported flight to fix in this war.")
-        return
-    await interaction.send(
-        f"Your last report: {describe_report(report)}.\n"
-        "Select the correct outcome to open the kill sheet with your reported numbers filled in:",
-        view=FlightReturnStatusView(report, report=report)
-    )
-
-
-async def send_report_choice(interaction: discord.Interaction, pilot: discord.abc.User):
-    reports = AirfieldRepository.get_recent_reports(str(pilot.id))
-    if not reports:
-        await interaction.send(f"{pilot.mention} has no reported flights in this war.", allowed_mentions=discord.AllowedMentions.none())
-        return
-    view = BaseView()
-    view.add_item(ReportSelect(reports))
-    await interaction.send(
-        f"Select the report to fix for {pilot.mention} (newest first):",
-        view=view, allowed_mentions=discord.AllowedMentions.none()
-    )
-
-
-class AdminPilotSelect(ui.UserSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choose a pilot...", min_values=1, max_values=1)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.send("Only admins can fix another pilot's report.")
-            return
-        await send_report_choice(interaction, self.values[0])
-
-
-class ReportSelect(ui.Select):
-    def __init__(self, reports):
-        options = [
-            discord.SelectOption(
-                label=f"{r['plane_type']} - {'Returned' if r['status'] == 'Returned' else 'Lost'} - {r['kills']} kills"[:100],
-                value=str(r["id"]),
-                description=f"Report #{r['id']}"
-            )
-            for r in reports[:25]
-        ]
-        super().__init__(placeholder="Choose a report...", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        report = AirfieldRepository.get_report(int(self.values[0]))
-        if not report or not is_admin(interaction.user):
-            await interaction.send("That report can't be corrected.")
-            return
-        await interaction.send(
-            f"Fixing: {describe_report(report)}.\n"
-            "Select the correct outcome to open the kill sheet with the reported numbers filled in:",
-            view=FlightReturnStatusView(report, report=report)
-        )
-
+from app.features.airfield.views.modals import CreateDepotModal, KillReportModal
+from app.features.airfield.views.selects import DepotSelect, DestinationSelectView
+from app.features.airfield.views.utils import finish_flight
 
 class FlightReturnStatusView(BaseView):
-    def __init__(self, flight, report=None):
+    """Logs how the flight ended. A returned Transport flight also asks which depot it delivered to."""
+    def __init__(self, flight):
         super().__init__(timeout=180)
-        self.report = report
-        plane = "Aircraft"
-        if flight:
-            try:
-                plane = flight["plane_type"]
-            except Exception:
-                plane = str(flight)
-        self.plane_type = plane
+        self.airfield_id = flight["airfield_id"]
+        self.is_transport = (flight["usecase"] or "").strip().lower() == "transport"
 
     @ui.button(label="Returned", style=discord.ButtonStyle.green, emoji="🛬")
     async def returned(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(StructuredKillModal(self.plane_type, "Returned", self.report))
+        if self.is_transport:
+            await interaction.send(
+                "Transport flight: select the depot the aircraft was delivered to.",
+                view=DestinationSelectView(self.airfield_id)
+            )
+        else:
+            await finish_flight(interaction, "Returned")
 
     @ui.button(label="Loss", style=discord.ButtonStyle.danger, emoji="💥")
     async def loss(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(StructuredKillModal(self.plane_type, "Loss", self.report))
+        await finish_flight(interaction, "Loss")
 
 
 class DepotFlightView(BaseView):
@@ -143,13 +59,13 @@ class DepotManagementView(BaseView):
             await interaction.send("You don't have an active flight to log.")
             return
         await interaction.send(
-            f"Logging your **{active_flight['plane_type']}** flight. Select the outcome to open the kill sheet:",
+            f"Logging your **{active_flight['plane_type']}** flight. Select how it ended:",
             view=FlightReturnStatusView(active_flight)
         )
 
-    @ui.button(label="Fix Last Report", style=discord.ButtonStyle.secondary, custom_id="scum:fix_report", row=0)
-    async def fix_report(self, interaction: discord.Interaction, button: ui.Button):
-        await send_fix_report(interaction)
+    @ui.button(label="Report Kills", style=discord.ButtonStyle.secondary, custom_id="scum:report_kills", row=0)
+    async def report_kills(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(KillReportModal())
 
     @ui.button(label="Create Depot", style=discord.ButtonStyle.secondary, custom_id="scum:create_depot", row=1)
     async def create_depot(self, interaction: discord.Interaction, button: ui.Button):

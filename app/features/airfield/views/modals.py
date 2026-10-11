@@ -2,7 +2,6 @@ import logging
 import discord
 from discord import ui
 from app.core import settings
-from app.core.permissions import is_admin
 from app.core.ui import PASSCODE_PATTERN, BaseModal
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.panel import refresh_kill_board
@@ -108,89 +107,31 @@ class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission")
         await checkout_and_log(interaction, self.airfield_id, self.plane_type, self.usecase.value.strip())
 
 
-class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
-    toxot_kills = ui.TextInput(label="Toxot-902 “Blind Silver” Kills (Fighter)", placeholder="0", default="0", required=False, max_length=2)
-    harpy_kills = ui.TextInput(label="Daimon aK-5 “Harpy” Kills (Heavy Fighter)", placeholder="0", default="0", required=False, max_length=2)
-    db_kills = ui.TextInput(label="Mergo-4 “Myrmidon” Kills (Dive Bomber)", placeholder="0", default="0", required=False, max_length=2)
-    para_kills = ui.TextInput(label="V-5b Pegasus Kills (Paratrooper Plane)", placeholder="0", default="0", required=False, max_length=2)
-    hb_kills = ui.TextInput(label="Tzykalia Kills (Heavy Bomber)", placeholder="0", default="0", required=False, max_length=2)
-
-    def __init__(self, plane_type: str, status: str, report=None):
-        super().__init__()
-        self.plane_type = str(plane_type) if plane_type else "Aircraft"
-        self.status = str(status) if status else "Returned"
-        # With a report, this corrects that earlier sortie instead of logging the active flight.
-        self.report = report
-        if report is not None:
-            self.toxot_kills.default = str(report["toxot_kills"])
-            self.harpy_kills.default = str(report["harpy_kills"])
-            self.db_kills.default = str(report["myrmidon_kills"])
-            self.para_kills.default = str(report["pegasus_kills"])
-            self.hb_kills.default = str(report["tzykalia_kills"])
+class KillReportModal(BaseModal, title="Report Kills"):
+    """Kills are reported on their own, separately from logging a flight's return."""
+    toxot_kills = ui.TextInput(label="Toxot-902 “Blind Silver” Kills (Fighter)", placeholder="0", default="0", required=False, max_length=3)
+    harpy_kills = ui.TextInput(label="Daimon aK-5 “Harpy” Kills (Heavy Fighter)", placeholder="0", default="0", required=False, max_length=3)
+    db_kills = ui.TextInput(label="Mergo-4 “Myrmidon” Kills (Dive Bomber)", placeholder="0", default="0", required=False, max_length=3)
+    para_kills = ui.TextInput(label="V-5b Pegasus Kills (Paratrooper Plane)", placeholder="0", default="0", required=False, max_length=3)
+    hb_kills = ui.TextInput(label="Tzykalia Kills (Heavy Bomber)", placeholder="0", default="0", required=False, max_length=3)
 
     async def on_submit(self, interaction: discord.Interaction):
-        user_id = str(interaction.user.id)
-
         def count(field: ui.TextInput) -> int:
             try:
                 return max(0, int(field.value.strip() or "0"))
             except ValueError:
                 return 0
 
-        t_count = count(self.toxot_kills)
-        h_count = count(self.harpy_kills)
-        db_count = count(self.db_kills)
-        para_count = count(self.para_kills)
-        hb_count = count(self.hb_kills)
+        by_type = {
+            "toxot": count(self.toxot_kills), "harpy": count(self.harpy_kills), "myrmidon": count(self.db_kills),
+            "pegasus": count(self.para_kills), "tzykalia": count(self.hb_kills),
+        }
+        names = {"toxot": "Toxot-902", "harpy": "Harpy", "myrmidon": "Myrmidon", "pegasus": "Pegasus", "tzykalia": "Tzykalia"}
+        parts = [f"{n}x {names[k]}" for k, n in by_type.items() if n > 0]
+        if not parts:
+            await interaction.send("No kills entered, so nothing was recorded.")
+            return
 
-        total_air_kills = t_count + h_count + db_count + para_count + hb_count
-
-        air_parts = []
-        if t_count > 0: air_parts.append(f"{t_count}x Toxot-902")
-        if h_count > 0: air_parts.append(f"{h_count}x Harpy")
-        if db_count > 0: air_parts.append(f"{db_count}x Myrmidon")
-        if para_count > 0: air_parts.append(f"{para_count}x Pegasus")
-        if hb_count > 0: air_parts.append(f"{hb_count}x Tzykalia")
-
-        air_summary = ", ".join(air_parts) if air_parts else "None"
-        target_summary = f"Air: [{air_summary}]"
-
-        by_type = {"toxot": t_count, "harpy": h_count, "myrmidon": db_count, "pegasus": para_count, "tzykalia": hb_count}
-
-        if self.report is not None:
-            if not AirfieldRepository.update_report(
-                self.report["id"], user_id, self.status, total_air_kills, target_summary, by_type,
-                any_pilot=is_admin(interaction.user)
-            ):
-                await interaction.send("That report can't be corrected any more.")
-                return
-            completed = self.report
-        else:
-            completed = AirfieldRepository.complete_flight(user_id, self.status, total_air_kills, target_summary, by_type)
-            if not completed:
-                await interaction.send("You do not have an active flight to log.")
-                return
-
-        outcome = "returned" if self.status == "Returned" else "lost"
-        await interaction.send(
-            f"{'Report corrected' if self.report is not None else 'Flight logged'}: **{self.plane_type}** {outcome}.\n"
-            f"Air kills: **{air_summary}**"
-        )
-
-        kills_text = join_natural(air_parts)
-        # A correction made by an admin is logged against the pilot who flew the sortie.
-        pilot = f"<@{self.report['removed_by']}>" if self.report is not None else interaction.user.mention
-        plane = f"{article(self.plane_type)} **{self.plane_type}**"
-        if self.status == "Returned":
-            log_msg = f"🛬 {pilot} has returned {plane} to the stockpile"
-            log_msg += f", taking down {kills_text}." if kills_text else "."
-        else:
-            log_msg = f"💥 {pilot} has marked {plane} as lost"
-            log_msg += f", taking down {kills_text} in the process." if kills_text else "."
-        if self.report is not None:
-            corrector = "" if pilot == interaction.user.mention else f" by {interaction.user.mention}"
-            log_msg = f"✏️ Corrected report{corrector}: {log_msg}"
-        await log_to_depot_thread(interaction.guild, completed["airfield_id"], log_msg)
-
-        # Keep the kill board under the controls message current.
+        AirfieldRepository.add_kill_report(str(interaction.user.id), by_type)
+        await interaction.send(f"Kills recorded: **{join_natural(parts)}**.")
         await refresh_kill_board(interaction.guild)

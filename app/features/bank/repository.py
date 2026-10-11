@@ -118,6 +118,19 @@ class BankRepository:
         return balances, _parse_timestamp(row["last_updated"])
 
     @staticmethod
+    def get_totals(war_number: int = None) -> tuple[dict[str, int], int]:
+        """Each tracked material summed across every ACTIVE stockpile of the war, and how many stockpiles that is."""
+        stockpiles = BankRepository.get_stockpiles(war_number)
+        with get_db() as conn:
+            totals: dict[str, int] = {}
+            for stockpile in stockpiles:
+                for label, amount in BankRepository._balances(conn, stockpile["id"]).items():
+                    totals[label] = totals.get(label, 0) + amount
+            if not stockpiles:
+                totals = BankRepository._balances(conn, -1)
+        return totals, len(stockpiles)
+
+    @staticmethod
     def set_balances(stockpile_id: int, amounts: dict[str, int], user_id: str) -> list[tuple[str, int, int]]:
         """
         Sets the amount of each given material. Only the difference is recorded as a transaction.

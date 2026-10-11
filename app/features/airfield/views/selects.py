@@ -3,7 +3,7 @@ from discord import ui
 from app.core.ui import BaseView
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import update_thread_state, send_thread_message
-from app.features.airfield.views.utils import MISSION_PRESETS, checkout_and_log
+from app.features.airfield.views.utils import MISSION_PRESETS, checkout_and_log, finish_flight
 from app.features.airfield.views.modals import AddStockModal, CustomMissionModal
 
 class MissionSelect(ui.Select):
@@ -119,3 +119,31 @@ class DepotSelect(ui.Select):
         elif self.action == "flight":
             view = PlaneSelectView(airfield_id)
             await interaction.send("Select the aircraft type you are taking out:", view=view)
+
+
+class DestinationSelect(ui.Select):
+    """For a returned Transport flight: the depot the aircraft was delivered to."""
+    def __init__(self, source_airfield_id: int):
+        depots = AirfieldRepository.get_airfields()
+        options = [
+            discord.SelectOption(
+                label=d["name"][:100], value=str(d["id"]),
+                description=("Departed from here - " if d["id"] == source_airfield_id else "") + f"Location: {d['location']}"[:80]
+            )
+            for d in depots[:25]
+        ]
+        if not options:
+            options = [discord.SelectOption(label="No depots available", value="NONE")]
+        super().__init__(placeholder="Choose the destination depot...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "NONE":
+            await interaction.send("There are no depots available.")
+            return
+        await finish_flight(interaction, "Returned", int(self.values[0]))
+
+
+class DestinationSelectView(BaseView):
+    def __init__(self, source_airfield_id: int):
+        super().__init__(timeout=180)
+        self.add_item(DestinationSelect(source_airfield_id))

@@ -12,7 +12,7 @@ BANK_BOARD_MESSAGE_KEY = "bank.board_message_id"
 
 def build_controls_embed() -> discord.Embed:
     war = settings.get_active_war()
-    return discord.Embed(
+    embed = discord.Embed(
         title="Bank Control Panel",
         description=(
             f"Active war: **War {war}**\n\n"
@@ -22,6 +22,14 @@ def build_controls_embed() -> discord.Embed:
         ),
         color=discord.Color.blue()
     )
+    totals, count = BankRepository.get_totals(war)
+    lines = "\n".join(f"{label}: {amount:,}" for label, amount in totals.items()) or "No materials tracked."
+    embed.add_field(
+        name=f"Total across all stockpiles ({count} active)",
+        value=f"```yaml\n{lines}\n```",
+        inline=False
+    )
+    return embed
 
 
 def build_board_embed() -> discord.Embed:
@@ -83,6 +91,14 @@ async def sync_stockpile_board(guild: discord.Guild) -> str:
     channel = get_board_channel(guild)
     if channel is None:
         return "no_channel"
+
+    # The controls message shows the war-wide totals, so it changes whenever the board does.
+    controls_msg_id = settings.get_setting(BANK_CONTROLS_MESSAGE_KEY)
+    if controls_msg_id:
+        try:
+            await channel.get_partial_message(int(controls_msg_id)).edit(embed=build_controls_embed())
+        except Exception as e:
+            logger.warning(f"Could not refresh the bank controls message: {e}")
 
     board_msg_id = settings.get_setting(BANK_BOARD_MESSAGE_KEY)
     embed = build_board_embed()

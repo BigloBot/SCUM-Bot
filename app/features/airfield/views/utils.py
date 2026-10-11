@@ -71,6 +71,53 @@ def join_natural(parts: list[str]) -> str:
     return ", ".join(parts[:-1]) + f", and {parts[-1]}"
 
 
+async def finish_flight(interaction: discord.Interaction, status: str, destination_id: int = None):
+    """
+    Closes the pilot's active flight and logs it in the depot thread(s). `status` is 'Returned' or 'Loss'.
+    A returned Transport flight moves the aircraft to `destination_id`; any other return restocks the source depot.
+    """
+    flight = AirfieldRepository.get_user_active_flight(str(interaction.user.id))
+    if not flight:
+        await interaction.send("You don't have an active flight to log.")
+        return
+
+    try:
+        AirfieldRepository.complete_flight(str(interaction.user.id), status, destination_id)
+    except ValueError:
+        await interaction.send("That destination depot is no longer active. Pick another one.")
+        return
+
+    plane_type = flight["plane_type"]
+    plane = f"{article(plane_type)} **{plane_type}**"
+    mention = interaction.user.mention
+    source = AirfieldRepository.get_depot_by_id(flight["airfield_id"])
+    source_name = source["name"] if source else "the depot"
+
+    if status != "Returned":
+        await interaction.send(f"Flight logged: **{plane_type}** lost.")
+        await log_to_depot_thread(interaction.guild, flight["airfield_id"], f"💥 {mention} has marked {plane} as lost.")
+        return
+
+    if destination_id is not None and destination_id != flight["airfield_id"]:
+        destination = AirfieldRepository.get_depot_by_id(destination_id)
+        dest_name = destination["name"] if destination else "the destination depot"
+        await interaction.send(f"Flight logged: **{plane_type}** transported from **{source_name}** to **{dest_name}**.")
+        await log_to_depot_thread(
+            interaction.guild, flight["airfield_id"],
+            f"🚚 {mention} has transported {plane} out to **{dest_name}**."
+        )
+        await log_to_depot_thread(
+            interaction.guild, destination_id,
+            f"🚚 {mention} has transported {plane} in from **{source_name}**."
+        )
+        return
+
+    await interaction.send(f"Flight logged: **{plane_type}** returned to **{source_name}**.")
+    await log_to_depot_thread(
+        interaction.guild, flight["airfield_id"], f"🛬 {mention} has returned {plane} to the stockpile."
+    )
+
+
 async def checkout_and_log(interaction: discord.Interaction, airfield_id: int, plane_type: str, mission: str):
     user_id = str(interaction.user.id)
     success = AirfieldRepository.checkout_plane(airfield_id, plane_type, mission, user_id)

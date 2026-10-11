@@ -105,11 +105,11 @@ def build_kill_board_embed() -> discord.Embed:
     embed = discord.Embed(title=f"Kill Board - War {war}", color=discord.Color.red())
     total_kills = sum(totals[key] for key, _ in KILL_TYPES)
     embed.description = (
-        f"**{total_kills}** kills over **{totals['sorties']}** sorties ({totals['losses']} lost)."
-        if totals["sorties"] else "No sorties logged yet this war."
+        f"**{total_kills}** kills reported this war."
+        if total_kills else "No kills reported yet this war."
     )
 
-    if totals["sorties"]:
+    if total_kills:
         embed.add_field(
             name="Kills by aircraft",
             value="\n".join(f"{label}: **{totals[key]}**" for key, label in KILL_TYPES),
