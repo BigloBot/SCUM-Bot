@@ -8,6 +8,14 @@ logger = logging.getLogger(__name__)
 
 # ==================== INTERACTION EXTENSION ====================
 
+async def _delete_later(message, delay: float):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except discord.HTTPException:
+        pass
+
+
 async def _interaction_send(
         self,
         content: str = None,
@@ -17,22 +25,19 @@ async def _interaction_send(
         **kwargs
 ):
     """Sends an interaction response, defaulting to ephemeral=True and auto-deleting after 30s."""
-    if not self.response.is_done():
-        await self.response.send_message(content, ephemeral=ephemeral, **kwargs)
-        if delete_after:
-            try:
-                msg = await self.original_response()
-                async def _delete_later():
-                    await asyncio.sleep(delete_after)
-                    try:
-                        await msg.delete()
-                    except discord.HTTPException:
-                        pass
-                asyncio.create_task(_delete_later())
-            except discord.HTTPException:
-                pass
-    else:
-        await self.followup.send(content, ephemeral=ephemeral, delete_after=delete_after, **kwargs)
+    try:
+        if not self.response.is_done():
+            await self.response.send_message(content, ephemeral=ephemeral, **kwargs)
+            message = await self.original_response() if delete_after else None
+        else:
+            # Webhook.send() has no delete_after, so fetch the sent message and delete it ourselves.
+            message = await self.followup.send(content, ephemeral=ephemeral, wait=bool(delete_after), **kwargs)
+    except discord.HTTPException:
+        logger.error("Could not send an interaction response.", exc_info=True)
+        return
+
+    if delete_after and message is not None:
+        asyncio.create_task(_delete_later(message, delete_after))
 
 # Attach .send() directly to discord.Interaction so it's available everywhere automatically
 discord.Interaction.send = _interaction_send
