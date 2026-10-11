@@ -1,14 +1,14 @@
+from app.core import settings
 from app.core.database import get_db
 
 class AirfieldRepository:
     @staticmethod
     def get_active_war() -> int:
-        val = AirfieldRepository.get_config("active_war")
-        return int(val) if val else 1
+        return settings.get_active_war()
 
     @staticmethod
     def set_active_war(war_number: int):
-        AirfieldRepository.set_config("active_war", str(war_number))
+        settings.set_active_war(war_number)
 
     @staticmethod
     def _active_depot_id(conn, airfield_code: str, war_number: int) -> int | None:
@@ -248,14 +248,8 @@ class AirfieldRepository:
 
     @staticmethod
     def set_config(key: str, value: str):
-        with get_db() as conn:
-            conn.execute("INSERT OR REPLACE INTO bot_config (key, value) VALUES (?, ?)", (key, value))
-            conn.commit()
+        settings.set_setting(key, value)
 
     @staticmethod
     def get_config(key: str) -> str | None:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT value FROM bot_config WHERE key = ?", (key,))
-            row = cursor.fetchone()
-            return row["value"] if row else None
+        return settings.get_setting(key)

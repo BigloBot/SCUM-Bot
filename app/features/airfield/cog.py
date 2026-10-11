@@ -3,15 +3,10 @@ from typing import Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
+from app.core.permissions import has_admin, is_admin, is_server_owner
 from app.features.airfield.panel import refresh_control_panel
-from app.features.airfield.permissions import (
-    AIRFIELD_AVIATOR_ROLE_KEY,
-    can_use_airfield,
-    is_airfield_admin,
-    is_server_owner
-)
+from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY, can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.threads import sync_war_threads
 from app.features.airfield.views import (
     DepotFlightView,
     DepotManagementView,
@@ -27,21 +22,9 @@ def has_airfield_access():
         return ctx.guild is not None and can_use_airfield(ctx.author)
     return commands.check(predicate)
 
-def has_airfield_admin():
-    """Server owner, Discord administrators, and holders of the admin role the owner has set."""
-    async def predicate(ctx: commands.Context):
-        return ctx.guild is not None and is_airfield_admin(ctx.author)
-    return commands.check(predicate)
-
-def register(bot: commands.Bot):
+def register(bot: commands.Bot, scum: commands.HybridGroup):
     # Everything lives under /scum airfield. Discord only applies command visibility to top-level
     # commands, so /scum stays visible to everyone and permissions are enforced when a command runs.
-
-    @bot.hybrid_group(name="scum", description="SCUM bot commands.")
-    @commands.guild_only()
-    async def scum(ctx: commands.Context):
-        if ctx.invoked_subcommand is None:
-            await ctx.send("Try `/scum airfield` or `/scum war`.", ephemeral=True)
 
     @scum.group(name="airfield", description="Airfield depots, stockpiles and flights.")
     async def airfield(ctx: commands.Context):
@@ -56,7 +39,7 @@ def register(bot: commands.Bot):
     async def panel(ctx: commands.Context):
         forum_id = AirfieldRepository.get_config("forum_channel_id")
         if not forum_id:
-            if is_airfield_admin(ctx.author):
+            if is_admin(ctx.author):
                 await ctx.send("No forum channel is set yet. Run `/scum airfield config` first.", ephemeral=True)
             else:
                 await ctx.send("The forum channel hasn't been set up by an admin yet.", ephemeral=True)
@@ -100,42 +83,6 @@ def register(bot: commands.Bot):
             ephemeral=True
         )
 
-    # ==================== WAR CONTROL ====================
-    @scum.command(name="war", description="Show the active war, or switch to another war (admins only).")
-    @app_commands.describe(number="War number to switch to. Leave empty to show the active war.")
-    @commands.guild_only()
-    @has_airfield_admin()
-    async def war(ctx: commands.Context, number: Optional[int] = None):
-        if number is None:
-            await ctx.send(f"The active war is **War {AirfieldRepository.get_active_war()}**.", ephemeral=True)
-            return
-
-        if number < 1:
-            await ctx.send("The war number must be 1 or higher.", ephemeral=True)
-            return
-
-        await ctx.defer(ephemeral=True)
-        AirfieldRepository.set_active_war(number)
-
-        # Every depot thread is brought in line with the new active war, so switching back to an
-        # earlier war reopens exactly that war's threads and locks all the others.
-        counts = await sync_war_threads(ctx.guild, number)
-        message = (
-            f"Active war set to **War {number}**. "
-            f"Depot threads synced: {counts['changed']} updated, {counts['unchanged']} already correct."
-        )
-        problems = []
-        if counts["failed"]:
-            problems.append(f"{counts['failed']} could not be updated (check the bot's Manage Threads permission)")
-        if counts["missing"]:
-            problems.append(f"{counts['missing']} no longer exist in Discord")
-        if problems:
-            message += "\nNote: " + "; ".join(problems) + "."
-
-        # Keep the active war shown on the permanent controls message current.
-        await refresh_control_panel(ctx.guild)
-        await ctx.send(message, ephemeral=True)
-
     # ==================== ADMIN CONFIG ====================
     @airfield.command(name="config", description="View or change airfield settings (admins only).")
     @app_commands.describe(
@@ -145,7 +92,7 @@ def register(bot: commands.Bot):
         admin_role="Role that counts as airfield admin, e.g. verified officer (server owner only)."
     )
     @commands.guild_only()
-    @has_airfield_admin()
+    @has_admin()
     async def config(
         ctx: commands.Context,
         forum: Optional[discord.ForumChannel] = None,
