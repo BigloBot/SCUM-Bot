@@ -22,7 +22,7 @@ class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.depot_name.value.strip()
-        code = self.airfield_id.value.strip()
+        code = self.depot_code.value.strip()
         location = self.depot_location.value.strip()
 
         if not name or not location:
