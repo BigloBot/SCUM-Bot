@@ -2,6 +2,7 @@ import logging
 import discord
 from discord import ui
 from app.core import settings
+from app.core.permissions import is_admin
 from app.core.ui import PASSCODE_PATTERN, BaseModal
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.panel import refresh_kill_board
@@ -158,7 +159,8 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
 
         if self.report is not None:
             if not AirfieldRepository.update_report(
-                self.report["id"], user_id, self.status, total_air_kills, target_summary, by_type
+                self.report["id"], user_id, self.status, total_air_kills, target_summary, by_type,
+                any_pilot=is_admin(interaction.user)
             ):
                 await interaction.send("That report can't be corrected any more.")
                 return
@@ -176,15 +178,18 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
         )
 
         kills_text = join_natural(air_parts)
+        # A correction made by an admin is logged against the pilot who flew the sortie.
+        pilot = f"<@{self.report['removed_by']}>" if self.report is not None else interaction.user.mention
         plane = f"{article(self.plane_type)} **{self.plane_type}**"
         if self.status == "Returned":
-            log_msg = f"🛬 {interaction.user.mention} has returned {plane} to the stockpile"
+            log_msg = f"🛬 {pilot} has returned {plane} to the stockpile"
             log_msg += f", taking down {kills_text}." if kills_text else "."
         else:
-            log_msg = f"💥 {interaction.user.mention} has marked {plane} as lost"
+            log_msg = f"💥 {pilot} has marked {plane} as lost"
             log_msg += f", taking down {kills_text} in the process." if kills_text else "."
         if self.report is not None:
-            log_msg = f"✏️ Corrected report: {log_msg}"
+            corrector = "" if pilot == interaction.user.mention else f" by {interaction.user.mention}"
+            log_msg = f"✏️ Corrected report{corrector}: {log_msg}"
         await log_to_depot_thread(interaction.guild, completed["airfield_id"], log_msg)
 
         # Keep the kill board under the controls message current.

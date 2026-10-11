@@ -85,14 +85,15 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
             ephemeral=True
         )
 
-    @airfield.command(name="fix", description="Correct your most recent flight report.")
+    @airfield.command(name="fix", description="Correct your latest flight report (admins: any pilot's reports).")
+    @app_commands.describe(pilot="Admins only: the pilot whose report to fix.")
     @commands.guild_only()
     @has_airfield_access()
-    async def fix(ctx: commands.Context):
+    async def fix(ctx: commands.Context, pilot: Optional[discord.Member] = None):
         if ctx.interaction is None:
             await ctx.send("Use the **Fix Last Report** button on the control panel.", ephemeral=True)
             return
-        await send_fix_report(ctx.interaction)
+        await send_fix_report(ctx.interaction, pilot)
 
     # ==================== ADMIN CONFIG ====================
     @airfield.command(name="config", description="View or change airfield settings (admins only).")

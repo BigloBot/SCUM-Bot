@@ -213,35 +213,54 @@ class AirfieldRepository:
             conn.commit()
         return flight
 
+    _REPORT_COLUMNS = (
+        "p.id, p.airfield_id, p.plane_type, p.status, p.kills, p.removed_by, "
+        "p.toxot_kills, p.harpy_kills, p.myrmidon_kills, p.pegasus_kills, p.tzykalia_kills"
+    )
+
     @staticmethod
-    def get_last_report(user_id: str):
-        """The pilot's most recently reported sortie in the active war (the one they can correct), or None."""
+    def get_recent_reports(user_id: str, limit: int = 25):
+        """A pilot's reported sorties in the active war, newest first."""
         with get_db() as conn:
             return conn.execute(
-                """
-                SELECT p.id, p.airfield_id, p.plane_type, p.status, p.kills,
-                       p.toxot_kills, p.harpy_kills, p.myrmidon_kills, p.pegasus_kills, p.tzykalia_kills
-                FROM plane_instances p
+                f"""
+                SELECT {AirfieldRepository._REPORT_COLUMNS} FROM plane_instances p
                 WHERE p.removed_by = ? AND p.war_number = ? AND p.status IN ('Returned', 'Loss')
-                ORDER BY p.completed_at DESC, p.id DESC LIMIT 1
+                ORDER BY p.completed_at DESC, p.id DESC LIMIT ?
                 """,
-                (str(user_id), settings.get_active_war())
+                (str(user_id), settings.get_active_war(), limit)
+            ).fetchall()
+
+    @staticmethod
+    def get_last_report(user_id: str):
+        """The pilot's most recently reported sortie in the active war, or None."""
+        reports = AirfieldRepository.get_recent_reports(user_id, 1)
+        return reports[0] if reports else None
+
+    @staticmethod
+    def get_report(plane_id: int):
+        with get_db() as conn:
+            return conn.execute(
+                f"SELECT {AirfieldRepository._REPORT_COLUMNS} FROM plane_instances p "
+                "WHERE p.id = ? AND p.status IN ('Returned', 'Loss')",
+                (plane_id,)
             ).fetchone()
 
     @staticmethod
-    def update_report(plane_id: int, user_id: str, status: str, kills: int, target_killed: str, by_type: dict):
-        """Overwrites a finished sortie's outcome and kills. Only the pilot who flew it can correct it."""
+    def update_report(plane_id: int, user_id: str, status: str, kills: int, target_killed: str, by_type: dict,
+                      any_pilot: bool = False):
+        """Overwrites a finished sortie's outcome and kills. Only its pilot can, unless `any_pilot` (admins)."""
         with get_db() as conn:
             cursor = conn.execute(
                 """
                 UPDATE plane_instances
                 SET status = ?, kills = ?, target_killed = ?,
                     toxot_kills = ?, harpy_kills = ?, myrmidon_kills = ?, pegasus_kills = ?, tzykalia_kills = ?
-                WHERE id = ? AND removed_by = ? AND status IN ('Returned', 'Loss')
+                WHERE id = ? AND (removed_by = ? OR ?) AND status IN ('Returned', 'Loss')
                 """,
                 (status, kills, target_killed,
                  by_type.get("toxot", 0), by_type.get("harpy", 0), by_type.get("myrmidon", 0),
-                 by_type.get("pegasus", 0), by_type.get("tzykalia", 0), plane_id, str(user_id))
+                 by_type.get("pegasus", 0), by_type.get("tzykalia", 0), plane_id, str(user_id), int(any_pilot))
             )
             conn.commit()
             return cursor.rowcount > 0
