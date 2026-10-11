@@ -4,6 +4,7 @@ from discord import ui
 from app.core import settings
 from app.core.ui import PASSCODE_PATTERN, BaseModal
 from app.features.airfield.repository import AirfieldRepository
+from app.features.airfield.panel import refresh_kill_board
 from app.features.airfield.service import format_depot_thread_title
 from app.features.airfield.views.utils import (
     article,
@@ -112,7 +113,6 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
     db_kills = ui.TextInput(label="Mergo-4 “Myrmidon” Kills (Dive Bomber)", placeholder="0", default="0", required=False, max_length=2)
     para_kills = ui.TextInput(label="V-5b Pegasus Kills (Paratrooper Plane)", placeholder="0", default="0", required=False, max_length=2)
     hb_kills = ui.TextInput(label="Tzykalia Kills (Heavy Bomber)", placeholder="0", default="0", required=False, max_length=2)
-    notes = ui.TextInput(label="Additional Notes", placeholder="e.g. 1x Gunboat, Watchtowers", required=False, style=discord.TextStyle.paragraph)
 
     def __init__(self, plane_type: str, status: str):
         super().__init__()
@@ -144,11 +144,12 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
         if hb_count > 0: air_parts.append(f"{hb_count}x Tzykalia")
 
         air_summary = ", ".join(air_parts) if air_parts else "None"
-        extra_notes = self.notes.value.strip()
+        target_summary = f"Air: [{air_summary}]"
 
-        target_summary = f"Air: [{air_summary}]" + (f" | Notes: {extra_notes}" if extra_notes else "")
-
-        completed = AirfieldRepository.complete_flight(user_id, self.status, total_air_kills, target_summary)
+        completed = AirfieldRepository.complete_flight(
+            user_id, self.status, total_air_kills, target_summary,
+            {"toxot": t_count, "harpy": h_count, "myrmidon": db_count, "pegasus": para_count, "tzykalia": hb_count}
+        )
 
         if not completed:
             await interaction.send("You do not have an active flight to log.")
@@ -157,8 +158,7 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
         outcome = "returned" if self.status == "Returned" else "lost"
         await interaction.send(
             f"Flight logged: **{self.plane_type}** {outcome}.\n"
-            f"Air kills: **{air_summary}**\n"
-            f"Notes: {extra_notes or 'None'}"
+            f"Air kills: **{air_summary}**"
         )
 
         kills_text = join_natural(air_parts)
@@ -169,6 +169,7 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
         else:
             log_msg = f"💥 {interaction.user.mention} has marked {plane} as lost"
             log_msg += f", taking down {kills_text} in the process." if kills_text else "."
-        if extra_notes:
-            log_msg += f"\nNotes: *{extra_notes}*"
         await log_to_depot_thread(interaction.guild, completed["airfield_id"], log_msg)
+
+        # Keep the kill board under the controls message current.
+        await refresh_kill_board(interaction.guild)

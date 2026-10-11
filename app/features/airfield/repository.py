@@ -192,18 +192,57 @@ class AirfieldRepository:
             return True
 
     @staticmethod
-    def complete_flight(user_id: str, status: str, kills: int, target_killed: str):
+    def complete_flight(user_id: str, status: str, kills: int, target_killed: str, by_type: dict = None):
+        by_type = by_type or {}
         flight = AirfieldRepository.get_user_active_flight(user_id)
         if not flight:
             return None
 
         with get_db() as conn:
             conn.execute(
-                "UPDATE plane_instances SET status = ?, kills = ?, target_killed = ? WHERE id = ?",
-                (status, kills, target_killed, flight["id"])
+                """
+                UPDATE plane_instances
+                SET status = ?, kills = ?, target_killed = ?,
+                    toxot_kills = ?, harpy_kills = ?, myrmidon_kills = ?, pegasus_kills = ?, tzykalia_kills = ?
+                WHERE id = ?
+                """,
+                (status, kills, target_killed,
+                 by_type.get("toxot", 0), by_type.get("harpy", 0), by_type.get("myrmidon", 0),
+                 by_type.get("pegasus", 0), by_type.get("tzykalia", 0), flight["id"])
             )
             conn.commit()
         return flight
+
+    @staticmethod
+    def get_kill_board(war_number: int = None, limit: int = 10):
+        """Finished sorties of a war: totals per aircraft type, plus a pilot leaderboard by total kills."""
+        if war_number is None:
+            war_number = settings.get_active_war()
+        with get_db() as conn:
+            totals = conn.execute(
+                """
+                SELECT COUNT(*) AS sorties,
+                       COALESCE(SUM(status = 'Loss'), 0) AS losses,
+                       COALESCE(SUM(toxot_kills), 0) AS toxot,
+                       COALESCE(SUM(harpy_kills), 0) AS harpy,
+                       COALESCE(SUM(myrmidon_kills), 0) AS myrmidon,
+                       COALESCE(SUM(pegasus_kills), 0) AS pegasus,
+                       COALESCE(SUM(tzykalia_kills), 0) AS tzykalia
+                FROM plane_instances WHERE war_number = ? AND status IN ('Returned', 'Loss')
+                """,
+                (war_number,)
+            ).fetchone()
+            pilots = conn.execute(
+                """
+                SELECT removed_by AS user_id, SUM(kills) AS kills, COUNT(*) AS sorties
+                FROM plane_instances
+                WHERE war_number = ? AND status IN ('Returned', 'Loss') AND removed_by IS NOT NULL
+                GROUP BY removed_by HAVING kills > 0
+                ORDER BY kills DESC, sorties ASC LIMIT ?
+                """,
+                (war_number, limit)
+            ).fetchall()
+        return {"totals": totals, "pilots": pilots}
 
     @staticmethod
     def set_config(key: str, value: str):
