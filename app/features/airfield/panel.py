@@ -36,7 +36,7 @@ async def refresh_control_panel(guild: discord.Guild, channel: discord.TextChann
     The existing message is edited in place; if it was deleted, a new one is posted.
     Returns 'posted', 'updated', 'no_channel' or 'failed'.
     """
-    from app.features.airfield.views import DepotManagementView  # imported here to keep modules decoupled
+    from app.features.airfield.views.management import DepotManagementView  # imported here to keep modules decoupled
 
     old_channel_id = AirfieldRepository.get_config("controls_channel_id")
     old_message_id = AirfieldRepository.get_config("controls_message_id")

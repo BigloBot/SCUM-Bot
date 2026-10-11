@@ -137,7 +137,7 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
 
         total_air_kills = t_count + h_count + db_count + para_count + hb_count
 
-        - = []
+        air_parts = []
         if t_count > 0: air_parts.append(f"{t_count}x Toxot-902")
         if h_count > 0: air_parts.append(f"{h_count}x Harpy")
         if db_count > 0: air_parts.append(f"{db_count}x Myrmidon")
