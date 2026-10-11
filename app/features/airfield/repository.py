@@ -202,7 +202,7 @@ class AirfieldRepository:
             conn.execute(
                 """
                 UPDATE plane_instances
-                SET status = ?, kills = ?, target_killed = ?,
+                SET status = ?, kills = ?, target_killed = ?, completed_at = CURRENT_TIMESTAMP,
                     toxot_kills = ?, harpy_kills = ?, myrmidon_kills = ?, pegasus_kills = ?, tzykalia_kills = ?
                 WHERE id = ?
                 """,
@@ -212,6 +212,39 @@ class AirfieldRepository:
             )
             conn.commit()
         return flight
+
+    @staticmethod
+    def get_last_report(user_id: str):
+        """The pilot's most recently reported sortie in the active war (the one they can correct), or None."""
+        with get_db() as conn:
+            return conn.execute(
+                """
+                SELECT p.id, p.airfield_id, p.plane_type, p.status, p.kills,
+                       p.toxot_kills, p.harpy_kills, p.myrmidon_kills, p.pegasus_kills, p.tzykalia_kills
+                FROM plane_instances p
+                WHERE p.removed_by = ? AND p.war_number = ? AND p.status IN ('Returned', 'Loss')
+                ORDER BY p.completed_at DESC, p.id DESC LIMIT 1
+                """,
+                (str(user_id), settings.get_active_war())
+            ).fetchone()
+
+    @staticmethod
+    def update_report(plane_id: int, user_id: str, status: str, kills: int, target_killed: str, by_type: dict):
+        """Overwrites a finished sortie's outcome and kills. Only the pilot who flew it can correct it."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE plane_instances
+                SET status = ?, kills = ?, target_killed = ?,
+                    toxot_kills = ?, harpy_kills = ?, myrmidon_kills = ?, pegasus_kills = ?, tzykalia_kills = ?
+                WHERE id = ? AND removed_by = ? AND status IN ('Returned', 'Loss')
+                """,
+                (status, kills, target_killed,
+                 by_type.get("toxot", 0), by_type.get("harpy", 0), by_type.get("myrmidon", 0),
+                 by_type.get("pegasus", 0), by_type.get("tzykalia", 0), plane_id, str(user_id))
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     @staticmethod
     def get_kill_board(war_number: int = None, limit: int = 10):
@@ -234,7 +267,9 @@ class AirfieldRepository:
             ).fetchone()
             pilots = conn.execute(
                 """
-                SELECT removed_by AS user_id, SUM(kills) AS kills, COUNT(*) AS sorties
+                SELECT removed_by AS user_id, SUM(kills) AS kills, COUNT(*) AS sorties,
+                       SUM(toxot_kills) AS toxot, SUM(harpy_kills) AS harpy, SUM(myrmidon_kills) AS myrmidon,
+                       SUM(pegasus_kills) AS pegasus, SUM(tzykalia_kills) AS tzykalia
                 FROM plane_instances
                 WHERE war_number = ? AND status IN ('Returned', 'Loss') AND removed_by IS NOT NULL
                 GROUP BY removed_by HAVING kills > 0

@@ -12,6 +12,7 @@ from app.features.airfield.views.management import (
     DepotFlightView,
     DepotManagementView,
     FlightReturnStatusView,
+    send_fix_report,
 )
 
 def has_airfield_access():
@@ -30,7 +31,7 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
     @scum.group(name="airfield", description="Airfield depots, stockpiles and flights.")
     async def airfield(ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await ctx.send("Try `/scum airfield panel`, `flight`, or `return`.", ephemeral=True)
+            await ctx.send("Try `/scum airfield panel`, `flight`, `return` or `fix`.", ephemeral=True)
 
     # ==================== AVIATOR COMMANDS ====================
     # The same controls live permanently in the controls channel (see `config`); these are shortcuts.
@@ -83,6 +84,15 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
             view=FlightReturnStatusView(active_flight),
             ephemeral=True
         )
+
+    @airfield.command(name="fix", description="Correct your most recent flight report.")
+    @commands.guild_only()
+    @has_airfield_access()
+    async def fix(ctx: commands.Context):
+        if ctx.interaction is None:
+            await ctx.send("Use the **Fix Last Report** button on the control panel.", ephemeral=True)
+            return
+        await send_fix_report(ctx.interaction)
 
     # ==================== ADMIN CONFIG ====================
     @airfield.command(name="config", description="View or change airfield settings (admins only).")

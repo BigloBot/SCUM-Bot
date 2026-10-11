@@ -118,8 +118,10 @@ def build_kill_board_embed() -> discord.Embed:
         lines = []
         for i, pilot in enumerate(board["pilots"]):
             rank = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
-            lines.append(f"{rank} <@{pilot['user_id']}> - **{pilot['kills']}** ({pilot['sorties']} sorties)")
-        embed.add_field(name="Top pilots", value="\n".join(lines) or "No kills yet.", inline=True)
+            by_type = ", ".join(f"{pilot[key]}x {label}" for key, label in KILL_TYPES if pilot[key])
+            lines.append(f"{rank} <@{pilot['user_id']}> - **{pilot['kills']}** ({by_type or 'no breakdown'})")
+        # Per-pilot breakdowns are long, so the leaderboard gets its own full-width field.
+        embed.add_field(name="Top pilots (kills by aircraft)", value="\n".join(lines)[:1024] or "No kills yet.", inline=False)
 
     embed.timestamp = discord.utils.utcnow()
     return embed

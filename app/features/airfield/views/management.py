@@ -6,9 +6,24 @@ from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.views.modals import CreateDepotModal, StructuredKillModal
 from app.features.airfield.views.selects import DepotSelect
 
+async def send_fix_report(interaction: discord.Interaction):
+    """Lets a pilot correct their most recent reported sortie: pick the right outcome, then edit the kill sheet."""
+    report = AirfieldRepository.get_last_report(str(interaction.user.id))
+    if not report:
+        await interaction.send("You don't have a reported flight to fix in this war.")
+        return
+    outcome = "returned" if report["status"] == "Returned" else "lost"
+    await interaction.send(
+        f"Your last report: **{report['plane_type']}**, {outcome}, **{report['kills']}** kills.\n"
+        "Select the correct outcome to open the kill sheet with your reported numbers filled in:",
+        view=FlightReturnStatusView(report, report=report)
+    )
+
+
 class FlightReturnStatusView(BaseView):
-    def __init__(self, flight):
+    def __init__(self, flight, report=None):
         super().__init__(timeout=180)
+        self.report = report
         plane = "Aircraft"
         if flight:
             try:
@@ -19,11 +34,11 @@ class FlightReturnStatusView(BaseView):
 
     @ui.button(label="Returned", style=discord.ButtonStyle.green, emoji="🛬")
     async def returned(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(StructuredKillModal(self.plane_type, "Returned"))
+        await interaction.response.send_modal(StructuredKillModal(self.plane_type, "Returned", self.report))
 
     @ui.button(label="Loss", style=discord.ButtonStyle.danger, emoji="💥")
     async def loss(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(StructuredKillModal(self.plane_type, "Loss"))
+        await interaction.response.send_modal(StructuredKillModal(self.plane_type, "Loss", self.report))
 
 
 class DepotFlightView(BaseView):
@@ -59,6 +74,10 @@ class DepotManagementView(BaseView):
             f"Logging your **{active_flight['plane_type']}** flight. Select the outcome to open the kill sheet:",
             view=FlightReturnStatusView(active_flight)
         )
+
+    @ui.button(label="Fix Last Report", style=discord.ButtonStyle.secondary, custom_id="scum:fix_report", row=0)
+    async def fix_report(self, interaction: discord.Interaction, button: ui.Button):
+        await send_fix_report(interaction)
 
     @ui.button(label="Create Depot", style=discord.ButtonStyle.secondary, custom_id="scum:create_depot", row=1)
     async def create_depot(self, interaction: discord.Interaction, button: ui.Button):

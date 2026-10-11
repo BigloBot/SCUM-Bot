@@ -114,10 +114,18 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
     para_kills = ui.TextInput(label="V-5b Pegasus Kills (Paratrooper Plane)", placeholder="0", default="0", required=False, max_length=2)
     hb_kills = ui.TextInput(label="Tzykalia Kills (Heavy Bomber)", placeholder="0", default="0", required=False, max_length=2)
 
-    def __init__(self, plane_type: str, status: str):
+    def __init__(self, plane_type: str, status: str, report=None):
         super().__init__()
         self.plane_type = str(plane_type) if plane_type else "Aircraft"
         self.status = str(status) if status else "Returned"
+        # With a report, this corrects that earlier sortie instead of logging the active flight.
+        self.report = report
+        if report is not None:
+            self.toxot_kills.default = str(report["toxot_kills"])
+            self.harpy_kills.default = str(report["harpy_kills"])
+            self.db_kills.default = str(report["myrmidon_kills"])
+            self.para_kills.default = str(report["pegasus_kills"])
+            self.hb_kills.default = str(report["tzykalia_kills"])
 
     async def on_submit(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
@@ -146,18 +154,24 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
         air_summary = ", ".join(air_parts) if air_parts else "None"
         target_summary = f"Air: [{air_summary}]"
 
-        completed = AirfieldRepository.complete_flight(
-            user_id, self.status, total_air_kills, target_summary,
-            {"toxot": t_count, "harpy": h_count, "myrmidon": db_count, "pegasus": para_count, "tzykalia": hb_count}
-        )
+        by_type = {"toxot": t_count, "harpy": h_count, "myrmidon": db_count, "pegasus": para_count, "tzykalia": hb_count}
 
-        if not completed:
-            await interaction.send("You do not have an active flight to log.")
-            return
+        if self.report is not None:
+            if not AirfieldRepository.update_report(
+                self.report["id"], user_id, self.status, total_air_kills, target_summary, by_type
+            ):
+                await interaction.send("That report can't be corrected any more.")
+                return
+            completed = self.report
+        else:
+            completed = AirfieldRepository.complete_flight(user_id, self.status, total_air_kills, target_summary, by_type)
+            if not completed:
+                await interaction.send("You do not have an active flight to log.")
+                return
 
         outcome = "returned" if self.status == "Returned" else "lost"
         await interaction.send(
-            f"Flight logged: **{self.plane_type}** {outcome}.\n"
+            f"{'Report corrected' if self.report is not None else 'Flight logged'}: **{self.plane_type}** {outcome}.\n"
             f"Air kills: **{air_summary}**"
         )
 
@@ -169,6 +183,8 @@ class StructuredKillModal(BaseModal, title="Sortie Kill Sheet"):
         else:
             log_msg = f"💥 {interaction.user.mention} has marked {plane} as lost"
             log_msg += f", taking down {kills_text} in the process." if kills_text else "."
+        if self.report is not None:
+            log_msg = f"✏️ Corrected report: {log_msg}"
         await log_to_depot_thread(interaction.guild, completed["airfield_id"], log_msg)
 
         # Keep the kill board under the controls message current.
