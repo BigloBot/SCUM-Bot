@@ -1,12 +1,13 @@
 import logging
 import discord
+from app.core import settings
 from app.features.airfield.repository import AirfieldRepository
 
 logger = logging.getLogger(__name__)
 
 
 def build_panel_embed() -> discord.Embed:
-    war = AirfieldRepository.get_active_war()
+    war = settings.get_active_war()
     return discord.Embed(
         title="Airfield Control Panel",
         description=(

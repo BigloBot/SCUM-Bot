@@ -3,7 +3,8 @@ from typing import Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
-from app.core.permissions import has_admin, is_admin, is_server_owner
+from app.core import settings
+from app.core.permissions import has_admin, is_admin
 from app.features.airfield.panel import refresh_control_panel
 from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY, can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
@@ -50,7 +51,7 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
             await ctx.send("The configured forum channel is no longer valid. An admin needs to run `/scum airfield config` again.", ephemeral=True)
             return
 
-        war = AirfieldRepository.get_active_war()
+        war = settings.get_active_war()
         embed = discord.Embed(
             title="Airfield Control Panel",
             description=f"Active war: **War {war}**",
@@ -88,8 +89,7 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
     @app_commands.describe(
         forum="Forum channel where depot threads are created.",
         controls="Channel that holds the permanent control panel message.",
-        aviator_role="Role allowed to use the airfield controls and commands.",
-        admin_role="Role that counts as airfield admin, e.g. verified officer (server owner only)."
+        aviator_role="Role allowed to use the airfield controls and commands."
     )
     @commands.guild_only()
     @has_admin()
@@ -97,45 +97,28 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
         ctx: commands.Context,
         forum: Optional[discord.ForumChannel] = None,
         controls: Optional[discord.TextChannel] = None,
-        aviator_role: Optional[discord.Role] = None,
-        admin_role: Optional[discord.Role] = None
+        aviator_role: Optional[discord.Role] = None
     ):
         no_pings = discord.AllowedMentions.none()
 
         # With no options, just show the current settings.
-        if all(option is None for option in (forum, controls, aviator_role, admin_role)):
+        if all(option is None for option in (forum, controls, aviator_role)):
             forum_id = AirfieldRepository.get_config("forum_channel_id")
             controls_id = AirfieldRepository.get_config("controls_channel_id")
             aviator_id = AirfieldRepository.get_config(AIRFIELD_AVIATOR_ROLE_KEY)
-            admin_id = AirfieldRepository.get_config("admin_role_id")
             await ctx.send(
                 "**Airfield settings**\n"
                 f"Forum: {f'<#{forum_id}>' if forum_id else 'not set'}\n"
                 f"Controls channel: {f'<#{controls_id}>' if controls_id else 'not set'}\n"
-                f"Admin role: {f'<@&{admin_id}>' if admin_id else 'not set (Discord administrators only)'}\n"
                 f"Aviator role: {f'<@&{aviator_id}>' if aviator_id else 'not set (admins only)'}\n"
-                f"Active war: **War {AirfieldRepository.get_active_war()}** (change it with `/scum war`)",
+                f"Active war: **War {settings.get_active_war()}** (change it with `/scum config`)",
                 ephemeral=True,
                 allowed_mentions=no_pings
             )
             return
 
-        # Only the server owner may decide who counts as an admin, so an admin can't grant it onwards.
-        # Checked before anything is changed, so a refused command changes nothing.
-        if admin_role is not None:
-            if not is_server_owner(ctx.author):
-                await ctx.send("Only the server owner can set the admin role.", ephemeral=True)
-                return
-            if admin_role.is_default():
-                await ctx.send("The admin role can't be @everyone.", ephemeral=True)
-                return
-
         await ctx.defer(ephemeral=True)
         changes = []
-
-        if admin_role is not None:
-            AirfieldRepository.set_config("admin_role_id", str(admin_role.id))
-            changes.append(f"Admin role set to {admin_role.mention}.")
 
         if forum is not None:
             AirfieldRepository.set_config("forum_channel_id", str(forum.id))

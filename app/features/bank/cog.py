@@ -37,7 +37,7 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
                 "**Bank settings**\n"
                 f"Channel: {f'<#{channel_id}>' if channel_id else 'not set'}\n"
                 f"Officer role: {f'<@&{role_id}>' if role_id else 'not set (admins only)'}\n"
-                f"Active war: **War {settings.get_active_war()}** (change it with `/scum war`)",
+                f"Active war: **War {settings.get_active_war()}** (change it with `/scum config`)",
                 ephemeral=True,
                 allowed_mentions=no_pings
             )

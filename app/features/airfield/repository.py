@@ -3,14 +3,6 @@ from app.core.database import get_db
 
 class AirfieldRepository:
     @staticmethod
-    def get_active_war() -> int:
-        return settings.get_active_war()
-
-    @staticmethod
-    def set_active_war(war_number: int):
-        settings.set_active_war(war_number)
-
-    @staticmethod
     def _active_depot_id(conn, airfield_code: str, war_number: int) -> int | None:
         """Resolves a depot code to the id of the ACTIVE airfield row in the given war."""
         row = conn.execute(
@@ -21,7 +13,7 @@ class AirfieldRepository:
 
     @staticmethod
     def add_airfield(name: str, code: str, location: str, thread_id: str = None):
-        war_number = AirfieldRepository.get_active_war()
+        war_number = settings.get_active_war()
         with get_db() as conn:
             conn.execute(
                 """
@@ -35,7 +27,7 @@ class AirfieldRepository:
     @staticmethod
     def check_duplicate(name: str, code: str) -> str | None:
         """Checks if a depot name or passcode already exists active within the current war."""
-        war_number = AirfieldRepository.get_active_war()
+        war_number = settings.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -56,7 +48,7 @@ class AirfieldRepository:
     def delete_airfield(code: str, war_number: int = None):
         """Soft delete only: the row and all of its plane history are kept for reporting."""
         if war_number is None:
-            war_number = AirfieldRepository.get_active_war()
+            war_number = settings.get_active_war()
         with get_db() as conn:
             conn.execute(
                 "UPDATE airfields SET status = 'DELETED' WHERE code = ? AND war_number = ? AND status = 'ACTIVE'",
@@ -67,7 +59,7 @@ class AirfieldRepository:
     @staticmethod
     def get_airfields(war_number: int = None, status: str = 'ACTIVE'):
         if war_number is None:
-            war_number = AirfieldRepository.get_active_war()
+            war_number = settings.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -87,7 +79,7 @@ class AirfieldRepository:
     def get_depot(code: str, war_number: int = None):
         """Looks a depot up by code within a war, preferring the ACTIVE row over deleted ones."""
         if war_number is None:
-            war_number = AirfieldRepository.get_active_war()
+            war_number = settings.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -119,7 +111,7 @@ class AirfieldRepository:
 
     @staticmethod
     def add_plane(airfield_code: str, plane_type: str, user_id: str) -> bool:
-        war_number = AirfieldRepository.get_active_war()
+        war_number = settings.get_active_war()
         with get_db() as conn:
             airfield_id = AirfieldRepository._active_depot_id(conn, airfield_code, war_number)
             if airfield_id is None:
@@ -136,7 +128,7 @@ class AirfieldRepository:
 
     @staticmethod
     def get_available_planes(airfield_code: str):
-        war_number = AirfieldRepository.get_active_war()
+        war_number = settings.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -154,7 +146,7 @@ class AirfieldRepository:
 
     @staticmethod
     def get_stock_summary(airfield_code: str):
-        war_number = AirfieldRepository.get_active_war()
+        war_number = settings.get_active_war()
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -190,7 +182,7 @@ class AirfieldRepository:
         if AirfieldRepository.get_user_active_flight(user_id):
             return False
 
-        war_number = AirfieldRepository.get_active_war()
+        war_number = settings.get_active_war()
         with get_db() as conn:
             airfield_id = AirfieldRepository._active_depot_id(conn, airfield_code, war_number)
             if airfield_id is None:

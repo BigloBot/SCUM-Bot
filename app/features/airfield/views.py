@@ -1,6 +1,7 @@
 import logging
 import discord
 from discord import ui
+from app.core import settings
 from app.core.ui import PASSCODE_PATTERN, BaseModal, BaseView
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.permissions import can_use_airfield
@@ -105,7 +106,7 @@ class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
         # Creating the forum thread can take longer than Discord's 3 second response window.
         await interaction.response.defer(ephemeral=True)
 
-        war_number = AirfieldRepository.get_active_war()
+        war_number = settings.get_active_war()
         forum_channel_id = AirfieldRepository.get_config("forum_channel_id")
         thread = None
         if forum_channel_id:
