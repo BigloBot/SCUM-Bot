@@ -8,10 +8,10 @@ from app.core.permissions import has_admin, is_admin
 from app.features.airfield.panel import refresh_control_panel
 from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY, can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.views import (
+from app.features.airfield.views.management import (
     DepotFlightView,
     DepotManagementView,
-    FlightReturnStatusView
+    FlightReturnStatusView,
 )
 
 def has_airfield_access():
@@ -91,13 +91,14 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
         controls="Channel that holds the permanent control panel message.",
         aviator_role="Role allowed to use the airfield controls and commands."
     )
+
     @commands.guild_only()
     @has_admin()
     async def config(
-        ctx: commands.Context,
-        forum: Optional[discord.ForumChannel] = None,
-        controls: Optional[discord.TextChannel] = None,
-        aviator_role: Optional[discord.Role] = None
+            ctx: commands.Context,
+            forum: Optional[discord.ForumChannel] = None,
+            controls: Optional[discord.TextChannel] = None,
+            aviator_role: Optional[discord.Role] = None
     ):
         no_pings = discord.AllowedMentions.none()
 

@@ -7,7 +7,7 @@ from discord.ext import commands
 from app.core import settings
 from app.core.permissions import ADMIN_ROLE_KEY, has_admin, is_server_owner
 from app.features.airfield.panel import refresh_control_panel
-from app.features.airfield.threads import sync_war_threads
+from app.features.airfield.service import sync_war_threads
 from app.features.bank.board import rebuild_board
 
 

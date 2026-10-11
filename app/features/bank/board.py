@@ -1,7 +1,3 @@
-"""
-The bank channel: one control panel message, followed by one panel per stockpile showing its
-passcode, location and how many of each rare material it holds.
-"""
 import logging
 import discord
 from app.core import settings
@@ -11,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 BANK_CHANNEL_KEY = "bank.channel_id"
 BANK_CONTROLS_MESSAGE_KEY = "bank.controls_message_id"
+BANK_BOARD_MESSAGE_KEY = "bank.board_message_id"
 
 
 def build_controls_embed() -> discord.Embed:
@@ -20,26 +17,48 @@ def build_controls_embed() -> discord.Embed:
         description=(
             f"Active war: **War {war}**\n\n"
             "Add officer stockpiles and keep their rare material counts up to date. "
-            "Every stockpile is listed below with its passcode and what it holds. "
+            "All active stockpiles are summarized in the board below. "
             "Replies are only visible to you."
         ),
         color=discord.Color.blue()
     )
 
 
-def build_stockpile_embed(stockpile) -> discord.Embed:
-    balances, last_updated = BankRepository.get_summary(stockpile["id"])
+def build_board_embed() -> discord.Embed:
+    war = settings.get_active_war()
+    stockpiles = BankRepository.get_stockpiles()
+    active_stockpiles = [
+        s for s in stockpiles
+        if s["status"] == "ACTIVE" and s["war_number"] == war
+    ]
+
     embed = discord.Embed(
-        title=stockpile["name"],
-        description=f"**Code:** `{stockpile['code']}`\n**Location:** {stockpile['location']}",
+        title=f"📦 Active Officer Stockpiles (War {war})",
         color=discord.Color.gold()
     )
-    for label, amount in balances.items():
-        embed.add_field(name=label, value=f"{amount:,}", inline=True)
-    embed.set_footer(text=f"War {stockpile['war_number']}  |  Last updated")
-    embed.timestamp = last_updated
-    return embed
 
+    if not active_stockpiles:
+        embed.description = "No active stockpiles for this war yet. Use the **Add Stockpile** button above to create one."
+        return embed
+
+    for stockpile in active_stockpiles:
+        balances, _ = BankRepository.get_summary(stockpile["id"])
+
+        balance_lines = [f"  • {label}: {amount:,}" for label, amount in balances.items()]
+        materials_text = "\n".join(balance_lines) if balance_lines else "  • No items recorded"
+
+        field_value = (
+            f"🔑 **Code:** `{stockpile['code']}` | 📍 **Location:** {stockpile['location']}\n"
+            f"```yaml\n"
+            f"Materials:\n"
+            f"{materials_text}\n"
+            f"```"
+        )
+        embed.add_field(name=f"📦 {stockpile['name']}", value=field_value, inline=False)
+
+    embed.set_footer(text="Updated")
+    embed.timestamp = discord.utils.utcnow()
+    return embed
 
 def get_board_channel(guild: discord.Guild) -> discord.TextChannel | None:
     channel_id = settings.get_setting(BANK_CHANNEL_KEY)
@@ -47,55 +66,47 @@ def get_board_channel(guild: discord.Guild) -> discord.TextChannel | None:
     return channel if isinstance(channel, discord.TextChannel) else None
 
 
-async def _delete_message(channel: discord.TextChannel, message_id: str):
+async def _delete_message(channel: discord.TextChannel, message_id: str | None):
+    if not message_id:
+        return
     try:
         await channel.get_partial_message(int(message_id)).delete()
     except Exception:
-        pass  # already gone, or the bot can no longer reach it
+        pass  # already gone or bot lost permission
 
 
-async def sync_stockpile_message(guild: discord.Guild, stockpile_id: int) -> str:
+async def sync_stockpile_board(guild: discord.Guild) -> str:
     """
-    Brings one stockpile's panel in line with the database: edited in place, posted if it has none yet,
-    or removed if the stockpile was deleted or belongs to another war.
-    Returns 'updated', 'posted', 'removed', 'no_channel' or 'failed'.
+    Updates the single stockpile board message in place, or creates it if missing.
+    Returns 'updated', 'posted', 'no_channel' or 'failed'.
     """
-    stockpile = BankRepository.get_stockpile(stockpile_id)
     channel = get_board_channel(guild)
-    if stockpile is None or channel is None:
+    if channel is None:
         return "no_channel"
 
-    is_shown = stockpile["status"] == "ACTIVE" and stockpile["war_number"] == settings.get_active_war()
-    if not is_shown:
-        if stockpile["message_id"]:
-            await _delete_message(channel, stockpile["message_id"])
-            BankRepository.set_message_id(stockpile_id, None)
-        return "removed"
+    board_msg_id = settings.get_setting(BANK_BOARD_MESSAGE_KEY)
+    embed = build_board_embed()
 
-    embed = build_stockpile_embed(stockpile)
+    if board_msg_id:
+        try:
+            await channel.get_partial_message(int(board_msg_id)).edit(embed=embed)
+            return "updated"
+        except discord.NotFound:
+            pass  # message was manually deleted, fall through to re-post
+
     try:
-        if stockpile["message_id"]:
-            try:
-                await channel.get_partial_message(int(stockpile["message_id"])).edit(embed=embed)
-                return "updated"
-            except discord.NotFound:
-                pass  # the panel was deleted; post a fresh one below
         message = await channel.send(embed=embed)
+        settings.set_setting(BANK_BOARD_MESSAGE_KEY, str(message.id))
+        return "posted"
     except Exception as e:
-        logger.error(f"Failed to post the panel for stockpile {stockpile_id}: {e}")
+        logger.error(f"Failed to post the stockpile board in channel {channel.id}: {e}")
         return "failed"
-
-    BankRepository.set_message_id(stockpile_id, str(message.id))
-    return "posted"
 
 
 async def rebuild_board(guild: discord.Guild, channel: discord.TextChannel = None) -> str:
     """
-    Rebuilds the whole channel: control panel first, then a panel for each active stockpile of the
-    active war, in creation order. Anything the bot posted before is removed.
-      - `channel` given: that becomes the bank channel (the old board is removed from the previous one).
-      - `channel` omitted: the stored channel is rebuilt, e.g. after a war switch.
-    Returns 'posted', 'no_channel' or 'failed'.
+    Rebuilds the bank channel: posts the control panel first, followed by a single board 
+    message summarizing all active stockpiles.
     """
     from app.features.bank.views import BankControlView  # imported here to keep modules decoupled
 
@@ -105,31 +116,33 @@ async def rebuild_board(guild: discord.Guild, channel: discord.TextChannel = Non
         return "no_channel"
 
     old_controls_id = settings.get_setting(BANK_CONTROLS_MESSAGE_KEY)
-    old_panels = BankRepository.get_stockpiles_with_messages()
+    old_board_id = settings.get_setting(BANK_BOARD_MESSAGE_KEY)
 
-    # Post the new control panel first: if the bot can't post in this channel, nothing has been removed yet.
+    # Post the control panel
     try:
         controls = await target.send(embed=build_controls_embed(), view=BankControlView())
     except Exception as e:
         logger.error(f"Failed to post the bank control panel in channel {target.id}: {e}")
         return "failed"
 
-    settings.set_setting(BANK_CHANNEL_KEY, str(target.id))
-    settings.set_setting(BANK_CONTROLS_MESSAGE_KEY, str(controls.id))
+    # Post the board message below the control panel
+    try:
+        board_msg = await target.send(embed=build_board_embed())
+    except Exception as e:
+        logger.error(f"Failed to post the bank stockpile board in channel {target.id}: {e}")
+        await _delete_message(target, str(controls.id))
+        return "failed"
 
+    # Clean up old messages from previous setups
     if old_channel is not None:
         if old_controls_id:
             await _delete_message(old_channel, old_controls_id)
-        for panel in old_panels:
-            await _delete_message(old_channel, panel["message_id"])
-    BankRepository.clear_all_message_ids()
+        if old_board_id:
+            await _delete_message(old_channel, old_board_id)
 
-    try:
-        for stockpile in BankRepository.get_stockpiles():
-            message = await target.send(embed=build_stockpile_embed(stockpile))
-            BankRepository.set_message_id(stockpile["id"], str(message.id))
-    except Exception as e:
-        logger.error(f"Failed to post the bank stockpile panels in channel {target.id}: {e}")
-        return "failed"
+    # Store settings for the new panel messages
+    settings.set_setting(BANK_CHANNEL_KEY, str(target.id))
+    settings.set_setting(BANK_CONTROLS_MESSAGE_KEY, str(controls.id))
+    settings.set_setting(BANK_BOARD_MESSAGE_KEY, str(board_msg.id))
 
     return "posted"

@@ -2,7 +2,7 @@ import re
 import discord
 from discord import ui
 from app.core.ui import PASSCODE_PATTERN, BaseModal, BaseView
-from app.features.bank.board import sync_stockpile_message
+from app.features.bank.board import sync_stockpile_board  # Updated to sync the unified board
 from app.features.bank.permissions import can_use_bank
 from app.features.bank.repository import BankRepository
 
@@ -21,7 +21,6 @@ class CreateStockpileModal(BaseModal, title="Add Officer Stockpile"):
         code = self.stockpile_code.value.strip()
         location = self.stockpile_location.value.strip()
 
-        # Discord's min/max length is only a client-side hint, so validate here too.
         if not name or not location:
             await interaction.response.send_message("The stockpile name and location can't be empty.", ephemeral=True)
             return
@@ -36,10 +35,12 @@ class CreateStockpileModal(BaseModal, title="Add Officer Stockpile"):
             )
             return
 
-        # Posting the stockpile's panel can take longer than Discord's 3 second response window.
         await interaction.response.defer(ephemeral=True)
         stockpile_id = BankRepository.add_stockpile(name, code, location, str(interaction.user.id))
-        await sync_stockpile_message(interaction.guild, stockpile_id)
+
+        # Refresh the single unified stockpile board message
+        await sync_stockpile_board(interaction.guild)
+
         await interaction.followup.send(
             f"Stockpile **{name}** added. Use Update Stock to enter how much it holds.", ephemeral=True
         )
@@ -49,7 +50,7 @@ class UpdateStockModal(BaseModal):
     """One field per tracked material, pre-filled with the current amount. Whatever is entered becomes the new total."""
 
     def __init__(self, stockpile_id: int, stockpile_name: str, balances: dict[str, int]):
-        super().__init__(title=f"Update {stockpile_name}"[:45])  # Discord caps modal titles at 45 characters
+        super().__init__(title=f"Update {stockpile_name}"[:45])
         self.stockpile_id = stockpile_id
         self.fields_by_resource: dict[str, ui.TextInput] = {}
         for label, amount in list(balances.items())[:MAX_MODAL_FIELDS]:
@@ -76,7 +77,8 @@ class UpdateStockModal(BaseModal):
         await interaction.response.defer(ephemeral=True)
         changes = BankRepository.set_balances(self.stockpile_id, amounts, str(interaction.user.id))
         if changes:
-            await sync_stockpile_message(interaction.guild, self.stockpile_id)
+            # Refresh the single unified stockpile board message
+            await sync_stockpile_board(interaction.guild)
             lines = "\n".join(f"{label}: {old:,} to {new:,}" for label, old, new in changes)
             await interaction.followup.send(f"Updated **{stockpile['name']}**.\n{lines}", ephemeral=True)
         else:
@@ -89,7 +91,7 @@ class StockpileSelect(ui.Select):
         stockpiles = BankRepository.get_stockpiles()
         options = [
             discord.SelectOption(label=s["name"], value=str(s["id"]), description=f"Location: {s['location']}"[:100])
-            for s in stockpiles[:25]  # Discord allows at most 25 options in one dropdown
+            for s in stockpiles[:25]
         ]
         if not options:
             options = [discord.SelectOption(label="No stockpiles available", value="NONE")]
@@ -111,7 +113,10 @@ class StockpileSelect(ui.Select):
         elif self.action == "delete":
             await interaction.response.defer(ephemeral=True)
             BankRepository.delete_stockpile(stockpile["id"])
-            await sync_stockpile_message(interaction.guild, stockpile["id"])  # removes its panel
+
+            # Refresh the single unified stockpile board message to remove it
+            await sync_stockpile_board(interaction.guild)
+
             await interaction.followup.send(
                 f"Stockpile **{stockpile['name']}** deleted. Its history is kept for reports.", ephemeral=True
             )
@@ -120,13 +125,12 @@ class StockpileSelect(ui.Select):
 class BankControlView(BaseView):
     """
     The bank control panel. Persistent: fixed custom_ids and no timeout, so the buttons keep working
-    across bot restarts (registered in the bot's setup_hook).
+    across bot restarts.
     """
     def __init__(self):
         super().__init__(timeout=None)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # The channel may be readable by others, so check on every click.
         if can_use_bank(interaction.user):
             return True
         await interaction.response.send_message("You don't have permission to use these controls.", ephemeral=True)
