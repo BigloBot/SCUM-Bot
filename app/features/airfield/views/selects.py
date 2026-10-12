@@ -37,9 +37,13 @@ class AircraftSelect(ui.Select):
 
         options = []
         for aircraft in AirfieldRepository.get_aircraft_types():
+            role = aircraft.get("role") or (aircraft.role if hasattr(aircraft, "role") else None)
+            display_label = f"{aircraft['label']} ({role})" if role else aircraft["label"]
             count = stock.get(aircraft["label"], 0)
+            if role:
+                count += stock.get(f"{aircraft['label']} ({role})", 0)
             desc = f"{count} in stockpile" if count > 0 else "None registered in stockpile"
-            options.append(discord.SelectOption(label=aircraft["label"], description=desc))
+            options.append(discord.SelectOption(label=display_label, value=aircraft["label"], description=desc))
         if not options:
             options = [discord.SelectOption(label="No aircraft configured", value="NONE")]
 
@@ -58,7 +62,14 @@ class AircraftSelect(ui.Select):
 class CheckoutAircraftSelect(AircraftSelect):
     async def on_pick(self, interaction: discord.Interaction, plane_type: str):
         view = MissionSelectView(self.airfield_id, plane_type)
-        await interaction.send(f"Select the mission for **{plane_type}**:", view=view)
+        display = plane_type
+        for aircraft in AirfieldRepository.get_aircraft_types():
+            if aircraft["label"] == plane_type:
+                role = aircraft.get("role") or (aircraft.role if hasattr(aircraft, "role") else None)
+                if role:
+                    display = f"{aircraft['label']} ({role})"
+                break
+        await interaction.send(f"Select the mission for **{display}**:", view=view)
 
 
 class StockAircraftSelect(AircraftSelect):
@@ -159,7 +170,11 @@ class KillTypeSelect(ui.Select):
     def __init__(self, kill_types):
         self.kill_types = {t.key: t for t in kill_types}
         options = [
-            discord.SelectOption(label=t.label[:100], value=t.key, description=t.description[:100])
+            discord.SelectOption(
+                label=(f"{t.label} ({t.role})" if getattr(t, "role", None) else t.label)[:100],
+                value=t.key,
+                description=t.description[:100]
+            )
             for t in list(kill_types)[:25]
         ]
         super().__init__(placeholder="Choose the aircraft you shot down...", min_values=1, max_values=1, options=options)
@@ -168,7 +183,8 @@ class KillTypeSelect(ui.Select):
         kill_type = self.kill_types[self.values[0]]
         view = BaseView(timeout=180)
         view.add_item(KillCountSelect(kill_type))
-        await interaction.send(f"How many **{kill_type.label}** did you shoot down?", view=view)
+        name = f"{kill_type.label} ({kill_type.role})" if getattr(kill_type, "role", None) else kill_type.label
+        await interaction.send(f"How many **{name}** did you shoot down?", view=view)
 
 
 class KillCountSelect(ui.Select):
@@ -184,8 +200,9 @@ class KillCountSelect(ui.Select):
         if report_id is None:
             await interaction.send("Nothing was recorded.")
             return
+        name = f"{self.kill_type.label} ({self.kill_type.role})" if getattr(self.kill_type, "role", None) else self.kill_type.label
         await interaction.send(
-            f"Recorded **{count}x {self.kill_type.label}**.",
+            f"Recorded **{count}x {name}**.",
             view=ReportAnotherView(), delete_after=60
         )
         await refresh_kill_board(interaction.guild)

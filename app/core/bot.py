@@ -1,7 +1,7 @@
 import logging
 import discord
 from discord.ext import commands
-from app.core.config import Config
+from app.core.config import config
 from app.core.root import register_root
 from app.features.airfield.cog import register as register_airfield
 from app.features.airfield.views.management import DepotManagementView
@@ -14,7 +14,8 @@ class ScumBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
-        super().__init__(command_prefix=Config.COMMAND_PREFIX, intents=intents)
+        owner_ids = set(config.bot.owner_ids) if config.bot.owner_ids else None
+        super().__init__(command_prefix=config.bot.command_prefix, owner_ids=owner_ids, intents=intents)
 
         # Explicit routing registration on boot
         scum = register_root(self)

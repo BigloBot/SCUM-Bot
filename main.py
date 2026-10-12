@@ -2,14 +2,14 @@ import asyncio
 import logging
 import sys
 from app.core.bot import ScumBot
-from app.core.config import Config
+from app.core.config import config
 from app.core.database import run_database_migrations
 
 def main():
     # Error details are kept out of Discord messages, so make sure they reach the container logs.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    if not Config.DISCORD_TOKEN:
+    if not config.bot.token:
         print("Error: DISCORD_TOKEN is missing from environment variables.", file=sys.stderr)
         sys.exit(1)
 
@@ -22,7 +22,7 @@ def main():
     bot = ScumBot()
 
     try:
-        asyncio.run(bot.start(Config.DISCORD_TOKEN))
+        asyncio.run(bot.start(config.bot.token))
     except KeyboardInterrupt:
         print("\nBot shutting down gracefully...")
 

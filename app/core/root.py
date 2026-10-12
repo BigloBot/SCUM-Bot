@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from app.core import settings
+from app.core.config import reload_config
 from app.core.permissions import ADMIN_ROLE_KEY, has_admin, is_server_owner
 from app.features.airfield.panel import refresh_control_panel
 from app.features.airfield.service import sync_war_threads
@@ -101,6 +102,11 @@ def register_root(bot: commands.Bot) -> commands.HybridGroup:
     @has_admin()
     async def refresh(ctx: commands.Context):
         await ctx.defer(ephemeral=True)
+
+        try:
+            reload_config()
+        except Exception:
+            pass
 
         airfield = await refresh_control_panel(ctx.guild)  # also refreshes the kill board under it
         bank = await resync_board(ctx.guild)

@@ -1,5 +1,10 @@
 # Environment variables
 .env
+.env.*
+!.env.example
+
+# Local configuration overrides
+*.local.yaml
 
 # Python compilation and cache
 __pycache__/
