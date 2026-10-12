@@ -8,7 +8,7 @@ from app.core import settings
 from app.core.permissions import ADMIN_ROLE_KEY, has_admin, is_server_owner
 from app.features.airfield.panel import refresh_control_panel
 from app.features.airfield.service import sync_war_threads
-from app.features.bank.board import rebuild_board
+from app.features.bank.board import rebuild_board, resync_board
 
 
 def register_root(bot: commands.Bot) -> commands.HybridGroup:
@@ -18,7 +18,7 @@ def register_root(bot: commands.Bot) -> commands.HybridGroup:
     @commands.guild_only()
     async def scum(ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await ctx.send("Try `/scum airfield`, `/scum bank` or `/scum config`.", ephemeral=True)
+            await ctx.send("Try `/scum airfield`, `/scum bank`, `/scum config` or `/scum refresh`.", ephemeral=True)
 
     @scum.command(name="config", description="View or change server-wide settings (admins only).")
     @app_commands.describe(
@@ -95,5 +95,27 @@ def register_root(bot: commands.Bot) -> commands.HybridGroup:
             changes.append(line)
 
         await ctx.send("\n".join(changes), ephemeral=True, allowed_mentions=no_pings)
+
+    @scum.command(name="refresh", description="Force the control panel messages to resync (admins only).")
+    @commands.guild_only()
+    @has_admin()
+    async def refresh(ctx: commands.Context):
+        await ctx.defer(ephemeral=True)
+
+        airfield = await refresh_control_panel(ctx.guild)  # also refreshes the kill board under it
+        bank = await resync_board(ctx.guild)
+
+        labels = {
+            "updated": "refreshed",
+            "posted": "reposted",
+            "no_channel": "not set up yet",
+            "failed": "failed (check the bot's permissions in that channel)",
+        }
+        await ctx.send(
+            "**Resync**\n"
+            f"Airfield controls and kill board: {labels[airfield]}\n"
+            f"Bank controls and board: {labels[bank]}",
+            ephemeral=True
+        )
 
     return scum

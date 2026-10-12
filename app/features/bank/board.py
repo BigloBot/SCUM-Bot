@@ -119,6 +119,34 @@ async def sync_stockpile_board(guild: discord.Guild) -> str:
         return "failed"
 
 
+async def resync_board(guild: discord.Guild) -> str:
+    """
+    Forces the bank controls message and stockpile board back in line: both are edited in place (re-attaching
+    the control buttons), and if either was deleted the whole board is reposted.
+    Returns 'updated', 'posted', 'no_channel' or 'failed'.
+    """
+    from app.features.bank.views import BankControlView  # imported here to keep modules decoupled
+
+    channel = get_board_channel(guild)
+    if channel is None:
+        return "no_channel"
+
+    controls_id = settings.get_setting(BANK_CONTROLS_MESSAGE_KEY)
+    board_id = settings.get_setting(BANK_BOARD_MESSAGE_KEY)
+    if not controls_id or not board_id:
+        return await rebuild_board(guild)
+
+    try:
+        await channel.get_partial_message(int(controls_id)).edit(embed=build_controls_embed(), view=BankControlView())
+        await channel.get_partial_message(int(board_id)).edit(embed=build_board_embed())
+        return "updated"
+    except discord.NotFound:
+        return await rebuild_board(guild)  # one of them was deleted; repost both in the right order
+    except Exception as e:
+        logger.error(f"Failed to resync the bank board in channel {channel.id}: {e}")
+        return "failed"
+
+
 async def rebuild_board(guild: discord.Guild, channel: discord.TextChannel = None) -> str:
     """
     Rebuilds the bank channel: posts the control panel first, followed by a single board 
