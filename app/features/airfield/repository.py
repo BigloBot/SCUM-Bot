@@ -257,22 +257,8 @@ class AirfieldRepository:
         return report_id
 
     @staticmethod
-    def set_kill_report_media(report_id: int, user_id: str, url: str) -> bool:
-        """Attaches a photo or clip link to a kill report. Only the pilot who reported it can."""
-        with get_db() as conn:
-            cursor = conn.execute(
-                "UPDATE kill_reports SET media_url = ? WHERE id = ? AND user_id = ?",
-                (url, report_id, str(user_id))
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-
-    @staticmethod
-    def get_kill_board(war_number: int = None, pilot_limit: int = 10, clip_limit: int = 5):
-        """
-        Kill reports of a war: totals per kill type, a pilot leaderboard with each pilot's kills by type,
-        and the latest reports that came with a photo or clip.
-        """
+    def get_kill_board(war_number: int = None, pilot_limit: int = 10):
+        """Kill reports of a war: totals per kill type and a pilot leaderboard with each pilot's kills by type."""
         if war_number is None:
             war_number = settings.get_active_war()
         with get_db() as conn:
@@ -286,15 +272,6 @@ class AirfieldRepository:
                 GROUP BY r.user_id, t.id
                 """,
                 (war_number,)
-            ).fetchall()
-            clips = conn.execute(
-                """
-                SELECT r.id, r.user_id, r.media_url, SUM(i.count) AS kills
-                FROM kill_reports r JOIN kill_report_items i ON i.report_id = r.id
-                WHERE r.war_number = ? AND r.media_url IS NOT NULL
-                GROUP BY r.id ORDER BY r.id DESC LIMIT ?
-                """,
-                (war_number, clip_limit)
             ).fetchall()
             active_types = conn.execute(
                 "SELECT label FROM kill_types WHERE active = 1 ORDER BY sort_order, id"
@@ -312,7 +289,7 @@ class AirfieldRepository:
         leaderboard = sorted(pilots.values(), key=lambda p: -p["kills"])[:pilot_limit]
         for pilot in leaderboard:
             pilot["by_type"] = [(label, n) for _, label, n in sorted(pilot["by_type"])]
-        return {"types": list(by_type.items()), "total": sum(by_type.values()), "pilots": leaderboard, "clips": clips}
+        return {"types": list(by_type.items()), "total": sum(by_type.values()), "pilots": leaderboard}
 
     @staticmethod
     def set_config(key: str, value: str):

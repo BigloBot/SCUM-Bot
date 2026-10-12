@@ -90,11 +90,6 @@ BOARD_CHANNEL_KEY = "kills_channel_id"
 MEDALS = ["🥇", "🥈", "🥉"]
 
 
-def markdown_link(text: str, url: str) -> str:
-    """A safe [text](url) link: parentheses in the URL would end the link early."""
-    return f"[{text}]({url.replace('(', '%28').replace(')', '%29')})"
-
-
 def build_kill_board_embed() -> discord.Embed:
     war = settings.get_active_war()
     board = AirfieldRepository.get_kill_board(war)
@@ -117,13 +112,6 @@ def build_kill_board_embed() -> discord.Embed:
             by_type = ", ".join(f"{n}x {label}" for label, n in pilot["by_type"])
             lines.append(f"{rank} <@{pilot['user_id']}> - **{pilot['kills']}** ({by_type})")
         embed.add_field(name="Top pilots (kills by aircraft)", value="\n".join(lines)[:1024], inline=False)
-
-    if board["clips"]:
-        lines = []
-        for clip in board["clips"]:
-            link = markdown_link(f"{clip['kills']} kills", clip["media_url"])
-            lines.append(f"{link} by <@{clip['user_id']}>")
-        embed.add_field(name="Recent photos and clips", value="\n".join(lines)[:1024], inline=False)
 
     embed.timestamp = discord.utils.utcnow()
     return embed
