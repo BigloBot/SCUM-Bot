@@ -1,5 +1,6 @@
 from app.core import settings
 from app.core.database import get_db
+from app.features.airfield.kill_types import KILL_TYPES, KILL_TYPES_BY_KEY, KillType
 
 class AirfieldRepository:
     @staticmethod
@@ -227,20 +228,17 @@ class AirfieldRepository:
         return flight
 
     @staticmethod
-    def get_kill_types():
-        """The predetermined kill list (active only), in display order."""
-        with get_db() as conn:
-            return conn.execute(
-                "SELECT id, label, modal_label FROM kill_types WHERE active = 1 ORDER BY sort_order, id"
-            ).fetchall()
+    def get_kill_types() -> list[KillType]:
+        """The configured kill types, in display order (see kill_types.py)."""
+        return list(KILL_TYPES)
 
     @staticmethod
-    def add_kill_report(user_id: str, counts: dict[int, int]) -> int | None:
+    def add_kill_report(user_id: str, counts: dict[str, int]) -> int | None:
         """
-        Records kills reported by a pilot, independent of any flight. `counts` maps kill type id to kills.
-        Returns the new report's id, or None if nothing was reported.
+        Records kills reported by a pilot, independent of any flight. `counts` maps kill type key to kills.
+        Returns the new report's id, or None if nothing valid was reported.
         """
-        counts = {type_id: int(n) for type_id, n in counts.items() if int(n) > 0}
+        counts = {key: int(n) for key, n in counts.items() if key in KILL_TYPES_BY_KEY and int(n) > 0}
         if not counts:
             return None
         with get_db() as conn:
@@ -250,8 +248,8 @@ class AirfieldRepository:
             )
             report_id = cursor.lastrowid
             conn.executemany(
-                "INSERT INTO kill_report_items (report_id, kill_type_id, count) VALUES (?, ?, ?)",
-                [(report_id, type_id, n) for type_id, n in counts.items()]
+                "INSERT INTO kill_report_items (report_id, kill_type, count) VALUES (?, ?, ?)",
+                [(report_id, key, n) for key, n in counts.items()]
             )
             conn.commit()
         return report_id
@@ -264,32 +262,36 @@ class AirfieldRepository:
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT r.user_id, t.id AS type_id, t.label, t.sort_order, SUM(i.count) AS kills
-                FROM kill_report_items i
-                JOIN kill_reports r ON r.id = i.report_id
-                JOIN kill_types t ON t.id = i.kill_type_id
+                SELECT r.user_id, i.kill_type, SUM(i.count) AS kills
+                FROM kill_report_items i JOIN kill_reports r ON r.id = i.report_id
                 WHERE r.war_number = ?
-                GROUP BY r.user_id, t.id
+                GROUP BY r.user_id, i.kill_type
                 """,
                 (war_number,)
             ).fetchall()
-            active_types = conn.execute(
-                "SELECT label FROM kill_types WHERE active = 1 ORDER BY sort_order, id"
-            ).fetchall()
 
-        by_type: dict[str, int] = {t["label"]: 0 for t in active_types}
-        order: dict[str, int] = {}
+        def label(key: str) -> str:
+            # A type removed from the config still shows up under its stored key.
+            return KILL_TYPES_BY_KEY[key].label if key in KILL_TYPES_BY_KEY else key
+
+        def position(key: str) -> int:
+            return list(KILL_TYPES_BY_KEY).index(key) if key in KILL_TYPES_BY_KEY else len(KILL_TYPES_BY_KEY)
+
+        totals = {t.key: 0 for t in KILL_TYPES}
         pilots: dict[str, dict] = {}
         for row in rows:
-            by_type[row["label"]] = by_type.get(row["label"], 0) + row["kills"]
-            order[row["label"]] = row["sort_order"]
+            totals[row["kill_type"]] = totals.get(row["kill_type"], 0) + row["kills"]
             pilot = pilots.setdefault(row["user_id"], {"user_id": row["user_id"], "kills": 0, "by_type": []})
             pilot["kills"] += row["kills"]
-            pilot["by_type"].append((row["sort_order"], row["label"], row["kills"]))
+            pilot["by_type"].append((position(row["kill_type"]), label(row["kill_type"]), row["kills"]))
         leaderboard = sorted(pilots.values(), key=lambda p: -p["kills"])[:pilot_limit]
         for pilot in leaderboard:
-            pilot["by_type"] = [(label, n) for _, label, n in sorted(pilot["by_type"])]
-        return {"types": list(by_type.items()), "total": sum(by_type.values()), "pilots": leaderboard}
+            pilot["by_type"] = [(name, n) for _, name, n in sorted(pilot["by_type"])]
+        return {
+            "types": [(label(key), n) for key, n in totals.items()],
+            "total": sum(totals.values()),
+            "pilots": leaderboard,
+        }
 
     @staticmethod
     def set_config(key: str, value: str):

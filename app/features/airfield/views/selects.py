@@ -157,9 +157,9 @@ MAX_KILLS_PER_REPORT = 25  # a Discord dropdown holds at most 25 options
 class KillTypeSelect(ui.Select):
     """Step 1 of reporting kills: which aircraft was shot down (built from the kill_types list)."""
     def __init__(self, kill_types):
-        self.kill_types = {str(t["id"]): t for t in kill_types}
+        self.kill_types = {t.key: t for t in kill_types}
         options = [
-            discord.SelectOption(label=t["label"][:100], value=str(t["id"]), description=t["modal_label"][:100])
+            discord.SelectOption(label=t.label[:100], value=t.key, description=t.description[:100])
             for t in list(kill_types)[:25]
         ]
         super().__init__(placeholder="Choose the aircraft you shot down...", min_values=1, max_values=1, options=options)
@@ -168,7 +168,7 @@ class KillTypeSelect(ui.Select):
         kill_type = self.kill_types[self.values[0]]
         view = BaseView(timeout=180)
         view.add_item(KillCountSelect(kill_type))
-        await interaction.send(f"How many **{kill_type['label']}** did you shoot down?", view=view)
+        await interaction.send(f"How many **{kill_type.label}** did you shoot down?", view=view)
 
 
 class KillCountSelect(ui.Select):
@@ -180,12 +180,12 @@ class KillCountSelect(ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         count = int(self.values[0])
-        report_id = AirfieldRepository.add_kill_report(str(interaction.user.id), {self.kill_type["id"]: count})
+        report_id = AirfieldRepository.add_kill_report(str(interaction.user.id), {self.kill_type.key: count})
         if report_id is None:
             await interaction.send("Nothing was recorded.")
             return
         await interaction.send(
-            f"Recorded **{count}x {self.kill_type['label']}**.",
+            f"Recorded **{count}x {self.kill_type.label}**.",
             view=ReportAnotherView(), delete_after=60
         )
         await refresh_kill_board(interaction.guild)
