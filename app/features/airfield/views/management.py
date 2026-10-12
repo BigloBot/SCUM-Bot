@@ -3,8 +3,8 @@ from discord import ui
 from app.core.ui import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.views.modals import CreateDepotModal, KillReportModal
-from app.features.airfield.views.selects import DepotSelect, DestinationSelectView
+from app.features.airfield.views.modals import CreateDepotModal
+from app.features.airfield.views.selects import DepotSelect, DestinationSelectView, open_kill_report
 from app.features.airfield.views.utils import finish_flight
 
 class FlightReturnStatusView(BaseView):
@@ -65,7 +65,7 @@ class DepotManagementView(BaseView):
 
     @ui.button(label="Report Kills", style=discord.ButtonStyle.secondary, custom_id="scum:report_kills", row=0)
     async def report_kills(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(KillReportModal())
+        await open_kill_report(interaction)
 
     @ui.button(label="Create Depot", style=discord.ButtonStyle.secondary, custom_id="scum:create_depot", row=1)
     async def create_depot(self, interaction: discord.Interaction, button: ui.Button):

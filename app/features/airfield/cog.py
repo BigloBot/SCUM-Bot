@@ -8,7 +8,7 @@ from app.core.permissions import has_admin, is_admin
 from app.features.airfield.panel import refresh_control_panel
 from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY, can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.views.modals import KillReportModal
+from app.features.airfield.views.selects import open_kill_report
 from app.features.airfield.views.management import (
     DepotFlightView,
     DepotManagementView,
@@ -92,7 +92,7 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
         if ctx.interaction is None:
             await ctx.send("Use the **Report Kills** button on the control panel.", ephemeral=True)
             return
-        await ctx.interaction.response.send_modal(KillReportModal())
+        await open_kill_report(ctx.interaction)
 
     # ==================== ADMIN CONFIG ====================
     @airfield.command(name="config", description="View or change airfield settings (admins only).")

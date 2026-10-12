@@ -227,48 +227,92 @@ class AirfieldRepository:
         return flight
 
     @staticmethod
-    def add_kill_report(user_id: str, by_type: dict) -> int:
-        """Records kills reported by a pilot, independent of any flight. Returns the total reported."""
-        counts = {k: max(0, int(by_type.get(k, 0))) for k in ("toxot", "harpy", "myrmidon", "pegasus", "tzykalia")}
+    def get_kill_types():
+        """The predetermined kill list (active only), in display order."""
         with get_db() as conn:
-            conn.execute(
-                """
-                INSERT INTO kill_reports (war_number, user_id, toxot, harpy, myrmidon, pegasus, tzykalia)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (settings.get_active_war(), str(user_id), counts["toxot"], counts["harpy"],
-                 counts["myrmidon"], counts["pegasus"], counts["tzykalia"])
-            )
-            conn.commit()
-        return sum(counts.values())
+            return conn.execute(
+                "SELECT id, label, modal_label FROM kill_types WHERE active = 1 ORDER BY sort_order, id"
+            ).fetchall()
 
     @staticmethod
-    def get_kill_board(war_number: int = None, limit: int = 10):
-        """Kill reports of a war: totals per aircraft type, plus a pilot leaderboard by total kills."""
+    def add_kill_report(user_id: str, counts: dict[int, int]) -> int | None:
+        """
+        Records kills reported by a pilot, independent of any flight. `counts` maps kill type id to kills.
+        Returns the new report's id, or None if nothing was reported.
+        """
+        counts = {type_id: int(n) for type_id, n in counts.items() if int(n) > 0}
+        if not counts:
+            return None
+        with get_db() as conn:
+            cursor = conn.execute(
+                "INSERT INTO kill_reports (war_number, user_id) VALUES (?, ?)",
+                (settings.get_active_war(), str(user_id))
+            )
+            report_id = cursor.lastrowid
+            conn.executemany(
+                "INSERT INTO kill_report_items (report_id, kill_type_id, count) VALUES (?, ?, ?)",
+                [(report_id, type_id, n) for type_id, n in counts.items()]
+            )
+            conn.commit()
+        return report_id
+
+    @staticmethod
+    def set_kill_report_media(report_id: int, user_id: str, url: str) -> bool:
+        """Attaches a photo or clip link to a kill report. Only the pilot who reported it can."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "UPDATE kill_reports SET media_url = ? WHERE id = ? AND user_id = ?",
+                (url, report_id, str(user_id))
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def get_kill_board(war_number: int = None, pilot_limit: int = 10, clip_limit: int = 5):
+        """
+        Kill reports of a war: totals per kill type, a pilot leaderboard with each pilot's kills by type,
+        and the latest reports that came with a photo or clip.
+        """
         if war_number is None:
             war_number = settings.get_active_war()
         with get_db() as conn:
-            totals = conn.execute(
+            rows = conn.execute(
                 """
-                SELECT COUNT(*) AS reports,
-                       COALESCE(SUM(toxot), 0) AS toxot, COALESCE(SUM(harpy), 0) AS harpy,
-                       COALESCE(SUM(myrmidon), 0) AS myrmidon, COALESCE(SUM(pegasus), 0) AS pegasus,
-                       COALESCE(SUM(tzykalia), 0) AS tzykalia
-                FROM kill_reports WHERE war_number = ?
+                SELECT r.user_id, t.id AS type_id, t.label, t.sort_order, SUM(i.count) AS kills
+                FROM kill_report_items i
+                JOIN kill_reports r ON r.id = i.report_id
+                JOIN kill_types t ON t.id = i.kill_type_id
+                WHERE r.war_number = ?
+                GROUP BY r.user_id, t.id
                 """,
                 (war_number,)
-            ).fetchone()
-            pilots = conn.execute(
-                """
-                SELECT user_id, SUM(toxot + harpy + myrmidon + pegasus + tzykalia) AS kills,
-                       SUM(toxot) AS toxot, SUM(harpy) AS harpy, SUM(myrmidon) AS myrmidon,
-                       SUM(pegasus) AS pegasus, SUM(tzykalia) AS tzykalia
-                FROM kill_reports WHERE war_number = ?
-                GROUP BY user_id HAVING kills > 0 ORDER BY kills DESC LIMIT ?
-                """,
-                (war_number, limit)
             ).fetchall()
-        return {"totals": totals, "pilots": pilots}
+            clips = conn.execute(
+                """
+                SELECT r.id, r.user_id, r.media_url, SUM(i.count) AS kills
+                FROM kill_reports r JOIN kill_report_items i ON i.report_id = r.id
+                WHERE r.war_number = ? AND r.media_url IS NOT NULL
+                GROUP BY r.id ORDER BY r.id DESC LIMIT ?
+                """,
+                (war_number, clip_limit)
+            ).fetchall()
+            active_types = conn.execute(
+                "SELECT label FROM kill_types WHERE active = 1 ORDER BY sort_order, id"
+            ).fetchall()
+
+        by_type: dict[str, int] = {t["label"]: 0 for t in active_types}
+        order: dict[str, int] = {}
+        pilots: dict[str, dict] = {}
+        for row in rows:
+            by_type[row["label"]] = by_type.get(row["label"], 0) + row["kills"]
+            order[row["label"]] = row["sort_order"]
+            pilot = pilots.setdefault(row["user_id"], {"user_id": row["user_id"], "kills": 0, "by_type": []})
+            pilot["kills"] += row["kills"]
+            pilot["by_type"].append((row["sort_order"], row["label"], row["kills"]))
+        leaderboard = sorted(pilots.values(), key=lambda p: -p["kills"])[:pilot_limit]
+        for pilot in leaderboard:
+            pilot["by_type"] = [(label, n) for _, label, n in sorted(pilot["by_type"])]
+        return {"types": list(by_type.items()), "total": sum(by_type.values()), "pilots": leaderboard, "clips": clips}
 
     @staticmethod
     def set_config(key: str, value: str):

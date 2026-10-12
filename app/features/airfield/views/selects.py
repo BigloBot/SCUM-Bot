@@ -4,7 +4,7 @@ from app.core.ui import BaseView
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.utils import MISSION_PRESETS, checkout_and_log, finish_flight
-from app.features.airfield.views.modals import AddStockModal, CustomMissionModal
+from app.features.airfield.views.modals import MAX_MODAL_FIELDS, AddStockModal, CustomMissionModal, KillReportModal
 
 class MissionSelect(ui.Select):
     def __init__(self, airfield_id: int, plane_type: str):
@@ -147,3 +147,33 @@ class DestinationSelectView(BaseView):
     def __init__(self, source_airfield_id: int):
         super().__init__(timeout=180)
         self.add_item(DestinationSelect(source_airfield_id))
+
+
+
+class KillTypeSelect(ui.Select):
+    """Only needed when there are more kill types than fit in one form: pick the ones you are reporting."""
+    def __init__(self, kill_types):
+        self.kill_types = {str(t["id"]): t for t in kill_types}
+        options = [discord.SelectOption(label=t["label"][:100], value=str(t["id"])) for t in list(kill_types)[:25]]
+        super().__init__(
+            placeholder=f"Choose up to {MAX_MODAL_FIELDS} kill types...",
+            min_values=1, max_values=min(MAX_MODAL_FIELDS, len(options)), options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        chosen = [self.kill_types[v] for v in self.values]
+        await interaction.response.send_modal(KillReportModal(chosen))
+
+
+async def open_kill_report(interaction: discord.Interaction):
+    """Opens the kill report form for the configured kill types (via a picker if there are too many for one form)."""
+    kill_types = AirfieldRepository.get_kill_types()
+    if not kill_types:
+        await interaction.send("No kill types are configured.")
+        return
+    if len(kill_types) <= MAX_MODAL_FIELDS:
+        await interaction.response.send_modal(KillReportModal(kill_types))
+        return
+    view = BaseView()
+    view.add_item(KillTypeSelect(kill_types))
+    await interaction.send("Which kills are you reporting?", view=view)
