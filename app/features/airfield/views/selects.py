@@ -4,7 +4,8 @@ from app.core.ui import BaseView
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.utils import MISSION_PRESETS, checkout_and_log, finish_flight
-from app.features.airfield.views.modals import MAX_MODAL_FIELDS, AddStockModal, CustomMissionModal, KillReportModal
+from app.features.airfield.panel import refresh_kill_board
+from app.features.airfield.views.modals import AddStockModal, CustomMissionModal
 
 class MissionSelect(ui.Select):
     def __init__(self, airfield_id: int, plane_type: str):
@@ -150,30 +151,61 @@ class DestinationSelectView(BaseView):
 
 
 
+MAX_KILLS_PER_REPORT = 25  # a Discord dropdown holds at most 25 options
+
+
 class KillTypeSelect(ui.Select):
-    """Only needed when there are more kill types than fit in one form: pick the ones you are reporting."""
+    """Step 1 of reporting kills: which aircraft was shot down (built from the kill_types list)."""
     def __init__(self, kill_types):
         self.kill_types = {str(t["id"]): t for t in kill_types}
-        options = [discord.SelectOption(label=t["label"][:100], value=str(t["id"])) for t in list(kill_types)[:25]]
-        super().__init__(
-            placeholder=f"Choose up to {MAX_MODAL_FIELDS} kill types...",
-            min_values=1, max_values=min(MAX_MODAL_FIELDS, len(options)), options=options
-        )
+        options = [
+            discord.SelectOption(label=t["label"][:100], value=str(t["id"]), description=t["modal_label"][:100])
+            for t in list(kill_types)[:25]
+        ]
+        super().__init__(placeholder="Choose the aircraft you shot down...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        chosen = [self.kill_types[v] for v in self.values]
-        await interaction.response.send_modal(KillReportModal(chosen))
+        kill_type = self.kill_types[self.values[0]]
+        view = BaseView(timeout=180)
+        view.add_item(KillCountSelect(kill_type))
+        await interaction.send(f"How many **{kill_type['label']}** did you shoot down?", view=view)
+
+
+class KillCountSelect(ui.Select):
+    """Step 2: how many of that aircraft. Recording a report is one type at a time; report again for another."""
+    def __init__(self, kill_type):
+        self.kill_type = kill_type
+        options = [discord.SelectOption(label=str(n), value=str(n)) for n in range(1, MAX_KILLS_PER_REPORT + 1)]
+        super().__init__(placeholder="Choose how many...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        count = int(self.values[0])
+        report_id = AirfieldRepository.add_kill_report(str(interaction.user.id), {self.kill_type["id"]: count})
+        if report_id is None:
+            await interaction.send("Nothing was recorded.")
+            return
+        await interaction.send(
+            f"Recorded **{count}x {self.kill_type['label']}**.",
+            view=ReportAnotherView(), delete_after=60
+        )
+        await refresh_kill_board(interaction.guild)
+
+
+class ReportAnotherView(BaseView):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @ui.button(label="Report another aircraft", style=discord.ButtonStyle.secondary)
+    async def another(self, interaction: discord.Interaction, button: ui.Button):
+        await open_kill_report(interaction)
 
 
 async def open_kill_report(interaction: discord.Interaction):
-    """Opens the kill report form for the configured kill types (via a picker if there are too many for one form)."""
+    """Starts reporting kills: a dropdown of the configured kill types, then a dropdown for how many."""
     kill_types = AirfieldRepository.get_kill_types()
     if not kill_types:
         await interaction.send("No kill types are configured.")
         return
-    if len(kill_types) <= MAX_MODAL_FIELDS:
-        await interaction.response.send_modal(KillReportModal(kill_types))
-        return
-    view = BaseView()
+    view = BaseView(timeout=180)
     view.add_item(KillTypeSelect(kill_types))
-    await interaction.send("Which kills are you reporting?", view=view)
+    await interaction.send("Which aircraft did you shoot down?", view=view)

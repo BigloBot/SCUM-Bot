@@ -4,7 +4,6 @@ from discord import ui
 from app.core import settings
 from app.core.ui import PASSCODE_PATTERN, BaseModal
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.panel import refresh_kill_board
 from app.features.airfield.service import format_depot_thread_title
 from app.features.airfield.views.utils import (
     article,
@@ -105,39 +104,3 @@ class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission")
 
     async def on_submit(self, interaction: discord.Interaction):
         await checkout_and_log(interaction, self.airfield_id, self.plane_type, self.usecase.value.strip())
-
-
-MAX_MODAL_FIELDS = 5  # Discord allows at most five inputs in one form
-
-
-class KillReportModal(BaseModal):
-    """One count field per kill type, built from the kill_types list. Kills are reported separately from flights."""
-
-    def __init__(self, kill_types):
-        super().__init__(title="Report Kills")
-        self.fields_by_type: dict[int, ui.TextInput] = {}
-        self.labels_by_type: dict[int, str] = {}
-        for kill_type in list(kill_types)[:MAX_MODAL_FIELDS]:
-            field = ui.TextInput(
-                label=kill_type["modal_label"][:45], placeholder="0", default="0", required=False, max_length=3
-            )
-            self.add_item(field)
-            self.fields_by_type[kill_type["id"]] = field
-            self.labels_by_type[kill_type["id"]] = kill_type["label"]
-
-    async def on_submit(self, interaction: discord.Interaction):
-        counts = {}
-        for type_id, field in self.fields_by_type.items():
-            try:
-                counts[type_id] = max(0, int(field.value.strip() or "0"))
-            except ValueError:
-                counts[type_id] = 0
-
-        report_id = AirfieldRepository.add_kill_report(str(interaction.user.id), counts)
-        if report_id is None:
-            await interaction.send("No kills entered, so nothing was recorded.")
-            return
-
-        parts = [f"{n}x {self.labels_by_type[type_id]}" for type_id, n in counts.items() if n > 0]
-        await interaction.send(f"Kills recorded: **{join_natural(parts)}**.")
-        await refresh_kill_board(interaction.guild)
