@@ -1,5 +1,5 @@
 from app.core import settings
-from app.core.config import config
+from app.core.config import PlaneType, config
 from app.core.database import get_db
 from app.features.airfield.kill_types import KILL_TYPES, KILL_TYPES_BY_KEY, KillType
 
@@ -64,16 +64,9 @@ class AirfieldRepository:
             return cursor.fetchall()
 
     @staticmethod
-    def get_aircraft_types():
-        """The predetermined aircraft list (active only), in display order. `label` is what planes store."""
-        if config.features.airfield.warden_planes:
-            return config.features.airfield.warden_planes
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name, role, label FROM aircraft_types WHERE active = 1 ORDER BY sort_order, id"
-            )
-            return cursor.fetchall()
+    def get_aircraft_types() -> list[PlaneType]:
+        """Our own aircraft, in display order (see warden_planes in config.yaml). `label` is what planes store."""
+        return config.features.airfield.warden_planes
 
     @staticmethod
     def get_depot_by_id(airfield_id: int):
@@ -275,11 +268,7 @@ class AirfieldRepository:
 
         def label(key: str) -> str:
             # A type removed from the config still shows up under its stored key.
-            if key in KILL_TYPES_BY_KEY:
-                t = KILL_TYPES_BY_KEY[key]
-                role = getattr(t, "role", None)
-                return f"{t.label} ({role})" if role else t.label
-            return key
+            return KILL_TYPES_BY_KEY[key].display_label if key in KILL_TYPES_BY_KEY else key
 
         def position(key: str) -> int:
             return list(KILL_TYPES_BY_KEY).index(key) if key in KILL_TYPES_BY_KEY else len(KILL_TYPES_BY_KEY)

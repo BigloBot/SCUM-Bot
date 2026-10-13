@@ -7,3 +7,5 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+      # Edit config.yaml on the host and run /scum refresh to apply it without a rebuild.
+      - ./config.yaml:/app/config.yaml:ro

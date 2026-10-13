@@ -1,6 +1,6 @@
 import discord
 from discord import ui
-from app.core.ui import BaseView
+from app.libs.views import BaseView, FacilitySelect
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.utils import MISSION_PRESETS, checkout_and_log, finish_flight
@@ -37,13 +37,12 @@ class AircraftSelect(ui.Select):
 
         options = []
         for aircraft in AirfieldRepository.get_aircraft_types():
-            role = aircraft.get("role") or (aircraft.role if hasattr(aircraft, "role") else None)
-            display_label = f"{aircraft['label']} ({role})" if role else aircraft["label"]
-            count = stock.get(aircraft["label"], 0)
-            if role:
-                count += stock.get(f"{aircraft['label']} ({role})", 0)
+            # Stock stored under the older "Name (Role)" label still counts toward the plane.
+            count = stock.get(aircraft.label, 0)
+            if aircraft.role:
+                count += stock.get(aircraft.display_label, 0)
             desc = f"{count} in stockpile" if count > 0 else "None registered in stockpile"
-            options.append(discord.SelectOption(label=display_label, value=aircraft["label"], description=desc))
+            options.append(discord.SelectOption(label=aircraft.display_label, value=aircraft.label, description=desc))
         if not options:
             options = [discord.SelectOption(label="No aircraft configured", value="NONE")]
 
@@ -62,13 +61,8 @@ class AircraftSelect(ui.Select):
 class CheckoutAircraftSelect(AircraftSelect):
     async def on_pick(self, interaction: discord.Interaction, plane_type: str):
         view = MissionSelectView(self.airfield_id, plane_type)
-        display = plane_type
-        for aircraft in AirfieldRepository.get_aircraft_types():
-            if aircraft["label"] == plane_type:
-                role = aircraft.get("role") or (aircraft.role if hasattr(aircraft, "role") else None)
-                if role:
-                    display = f"{aircraft['label']} ({role})"
-                break
+        aircraft = next((a for a in AirfieldRepository.get_aircraft_types() if a.label == plane_type), None)
+        display = aircraft.display_label if aircraft else plane_type
         await interaction.send(f"Select the mission for **{display}**:", view=view)
 
 
@@ -89,24 +83,17 @@ class StockSelectView(BaseView):
         self.add_item(StockAircraftSelect(airfield_id))
 
 
-class DepotSelect(ui.Select):
+class DepotSelect(FacilitySelect):
     def __init__(self, action: str):
         self.action = action
-        depots = AirfieldRepository.get_airfields()
-        options = [
-            discord.SelectOption(label=d["name"], value=str(d["id"]), description=f"Location: {d['location']}")
-            for d in depots[:25]
-        ]
-        if not options:
-            options = [discord.SelectOption(label="No depots available", value="NONE")]
-        super().__init__(placeholder="Choose an airfield depot...", min_values=1, max_values=1, options=options)
+        super().__init__(
+            AirfieldRepository.get_airfields(),
+            placeholder="Choose an airfield depot...",
+            empty_label="No depots available",
+            empty_message="There are no depots available.",
+        )
 
-    async def callback(self, interaction: discord.Interaction):
-        if self.values[0] == "NONE":
-            await interaction.send("There are no depots available.")
-            return
-
-        airfield_id = int(self.values[0])
+    async def on_pick(self, interaction: discord.Interaction, airfield_id: int):
         if self.action == "add_stock":
             await interaction.send("Select the aircraft to add:", view=StockSelectView(airfield_id))
         elif self.action == "view_details":
@@ -171,7 +158,7 @@ class KillTypeSelect(ui.Select):
         self.kill_types = {t.key: t for t in kill_types}
         options = [
             discord.SelectOption(
-                label=(f"{t.label} ({t.role})" if getattr(t, "role", None) else t.label)[:100],
+                label=t.display_label[:100],
                 value=t.key,
                 description=t.description[:100]
             )
@@ -183,8 +170,7 @@ class KillTypeSelect(ui.Select):
         kill_type = self.kill_types[self.values[0]]
         view = BaseView(timeout=180)
         view.add_item(KillCountSelect(kill_type))
-        name = f"{kill_type.label} ({kill_type.role})" if getattr(kill_type, "role", None) else kill_type.label
-        await interaction.send(f"How many **{name}** did you shoot down?", view=view)
+        await interaction.send(f"How many **{kill_type.display_label}** did you shoot down?", view=view)
 
 
 class KillCountSelect(ui.Select):
@@ -200,9 +186,8 @@ class KillCountSelect(ui.Select):
         if report_id is None:
             await interaction.send("Nothing was recorded.")
             return
-        name = f"{self.kill_type.label} ({self.kill_type.role})" if getattr(self.kill_type, "role", None) else self.kill_type.label
         await interaction.send(
-            f"Recorded **{count}x {name}**.",
+            f"Recorded **{count}x {self.kill_type.display_label}**.",
             view=ReportAnotherView(), delete_after=60
         )
         await refresh_kill_board(interaction.guild)

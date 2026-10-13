@@ -1,6 +1,6 @@
 import discord
 from discord import ui
-from app.core.ui import BaseView
+from app.libs.views import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.views.modals import CreateDepotModal

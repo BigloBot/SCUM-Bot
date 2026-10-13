@@ -1,41 +1,25 @@
-import re
 import discord
 from discord import ui
-from app.core.ui import PASSCODE_PATTERN, BaseModal, BaseView
+from app.libs.views import (
+    AMOUNT_PATTERN, BaseModal, BaseView, FacilityModal, FacilitySelect, respond_or_followup
+)
 from app.features.bank.board import sync_stockpile_board  # Updated to sync the unified board
 from app.features.bank.permissions import can_use_bank
 from app.features.bank.repository import BankRepository
 
-# A whole number of up to 9 digits (matches the form field's max length).
-AMOUNT_PATTERN = re.compile(r"[0-9]{1,9}")
 MAX_MODAL_FIELDS = 5  # Discord allows at most five inputs in one form
 
 
-class CreateStockpileModal(BaseModal, title="Add Officer Stockpile"):
-    stockpile_name = ui.TextInput(label="Stockpile Name", placeholder="e.g. Officer Reserve", required=True, max_length=40)
-    stockpile_code = ui.TextInput(label="Passcode (6 digits)", placeholder="e.g. 123456", required=True, min_length=6, max_length=6)
-    stockpile_location = ui.TextInput(label="Location", placeholder="e.g. Callahan's Passage", required=True, max_length=40)
+class CreateStockpileModal(FacilityModal, title="Add Officer Stockpile"):
+    noun = "stockpile"
+    name_label = "Stockpile Name"
+    name_placeholder = "e.g. Officer Reserve"
 
-    async def on_submit(self, interaction: discord.Interaction):
-        name = self.stockpile_name.value.strip()
-        code = self.stockpile_code.value.strip()
-        location = self.stockpile_location.value.strip()
+    def is_duplicate(self, name: str) -> bool:
+        return BankRepository.check_duplicate(name)
 
-        if not name or not location:
-            await interaction.response.send_message("The stockpile name and location can't be empty.", ephemeral=True)
-            return
-        if not PASSCODE_PATTERN.fullmatch(code):
-            await interaction.response.send_message("The passcode must be exactly 6 digits (0-9).", ephemeral=True)
-            return
-
-        if BankRepository.check_duplicate(name):
-            await interaction.response.send_message(
-                "A stockpile with that name is already active in this war.", ephemeral=True
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        stockpile_id = BankRepository.add_stockpile(name, code, location, str(interaction.user.id))
+    async def create(self, interaction: discord.Interaction, name: str, code: str, location: str):
+        BankRepository.add_stockpile(name, code, location, str(interaction.user.id))
 
         # Refresh the single unified stockpile board message
         await sync_stockpile_board(interaction.guild)
@@ -84,26 +68,20 @@ class UpdateStockModal(BaseModal):
             await interaction.followup.send("No changes. Those are already the current amounts.", ephemeral=True)
 
 
-class StockpileSelect(ui.Select):
+class StockpileSelect(FacilitySelect):
     def __init__(self, action: str):
         self.action = action
-        stockpiles = BankRepository.get_stockpiles()
-        options = [
-            discord.SelectOption(label=s["name"], value=str(s["id"]), description=f"Location: {s['location']}"[:100])
-            for s in stockpiles[:25]
-        ]
-        if not options:
-            options = [discord.SelectOption(label="No stockpiles available", value="NONE")]
-        super().__init__(placeholder="Choose a stockpile...", min_values=1, max_values=1, options=options)
+        super().__init__(
+            BankRepository.get_stockpiles(),
+            placeholder="Choose a stockpile...",
+            empty_label="No stockpiles available",
+            empty_message="There are no stockpiles in the active war yet.",
+        )
 
-    async def callback(self, interaction: discord.Interaction):
-        if self.values[0] == "NONE":
-            await interaction.response.send_message("There are no stockpiles in the active war yet.", ephemeral=True)
-            return
-
-        stockpile = BankRepository.get_stockpile(int(self.values[0]))
+    async def on_pick(self, interaction: discord.Interaction, stockpile_id: int):
+        stockpile = BankRepository.get_stockpile(stockpile_id)
         if not stockpile or stockpile["status"] != "ACTIVE":
-            await interaction.response.send_message("That stockpile no longer exists.", ephemeral=True)
+            await respond_or_followup(interaction, "That stockpile no longer exists.")
             return
 
         if self.action == "update":

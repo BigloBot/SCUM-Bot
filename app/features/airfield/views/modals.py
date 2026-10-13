@@ -2,7 +2,7 @@ import logging
 import discord
 from discord import ui
 from app.core import settings
-from app.core.ui import PASSCODE_PATTERN, BaseModal
+from app.libs.views import BaseModal, FacilityModal
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.service import format_depot_thread_title
 from app.features.airfield.views.utils import (
@@ -14,29 +14,16 @@ from app.features.airfield.views.utils import (
 
 logger = logging.getLogger(__name__)
 
-class CreateDepotModal(BaseModal, title="Create Airfield Depot"):
-    depot_name = ui.TextInput(label="Depot Name", placeholder="e.g. ER-SCUM-AIR", required=True, max_length=40)
-    depot_code = ui.TextInput(label="Passcode (6 digits)", placeholder="e.g. 123456", required=True, min_length=6, max_length=6)
-    depot_location = ui.TextInput(label="Region / Location", placeholder="e.g. Callahan's Passage", required=True, max_length=40)
+class CreateDepotModal(FacilityModal, title="Create Airfield Depot"):
+    noun = "depot"
+    name_label = "Depot Name"
+    name_placeholder = "e.g. ER-SCUM-AIR"
+    location_label = "Region / Location"
 
-    async def on_submit(self, interaction: discord.Interaction):
-        name = self.depot_name.value.strip()
-        code = self.depot_code.value.strip()
-        location = self.depot_location.value.strip()
+    def is_duplicate(self, name: str) -> bool:
+        return AirfieldRepository.check_duplicate(name)
 
-        if not name or not location:
-            await interaction.send("The depot name and location can't be empty.")
-            return
-        if not PASSCODE_PATTERN.fullmatch(code):
-            await interaction.send("The passcode must be exactly 6 digits (0-9).")
-            return
-
-        if AirfieldRepository.check_duplicate(name):
-            await interaction.send("A depot with that name is already active in this war.")
-            return
-
-        await interaction.response.defer(ephemeral=True)
-
+    async def create(self, interaction: discord.Interaction, name: str, code: str, location: str):
         war_number = settings.get_active_war()
         forum_channel_id = AirfieldRepository.get_config("forum_channel_id")
         thread = None

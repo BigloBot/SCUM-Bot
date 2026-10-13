@@ -1,4 +1,5 @@
 """The /scum root command and the commands that span every feature."""
+import logging
 from typing import Optional
 
 import discord
@@ -10,6 +11,8 @@ from app.core.permissions import ADMIN_ROLE_KEY, has_admin, is_server_owner
 from app.features.airfield.panel import refresh_control_panel
 from app.features.airfield.service import sync_war_threads
 from app.features.bank.board import rebuild_board, resync_board
+
+logger = logging.getLogger(__name__)
 
 
 def register_root(bot: commands.Bot) -> commands.HybridGroup:
@@ -103,10 +106,12 @@ def register_root(bot: commands.Bot) -> commands.HybridGroup:
     async def refresh(ctx: commands.Context):
         await ctx.defer(ephemeral=True)
 
+        config_error = None
         try:
             reload_config()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Could not reload config.yaml: %s", e, exc_info=True)
+            config_error = str(e).splitlines()[0][:200]
 
         airfield = await refresh_control_panel(ctx.guild)  # also refreshes the kill board under it
         bank = await resync_board(ctx.guild)
@@ -120,7 +125,8 @@ def register_root(bot: commands.Bot) -> commands.HybridGroup:
         await ctx.send(
             "**Resync**\n"
             f"Airfield controls and kill board: {labels[airfield]}\n"
-            f"Bank controls and board: {labels[bank]}",
+            f"Bank controls and board: {labels[bank]}\n"
+            + (f"Config: **not reloaded**, still using the previous one ({config_error})" if config_error else "Config: reloaded"),
             ephemeral=True
         )
 

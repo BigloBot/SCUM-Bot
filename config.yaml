@@ -1,0 +1,58 @@
+# Bot configuration. Loaded once at startup; `/scum refresh` reloads it without a restart.
+#
+# Secrets (DISCORD_TOKEN) belong in the environment / .env, never in this file.
+# These environment variables are used when the matching value is not set here:
+#   COMMAND_PREFIX  -> bot.command_prefix  (default "!")
+#   DATABASE_PATH   -> database.path       (default "data/bot.db")
+
+bot:
+  # Discord user ids that count as bot admins everywhere, in addition to the server owner,
+  # Discord administrators and the admin role set with /scum config.
+  owner_ids: []
+
+features:
+  airfield:
+    # Aircraft pilots can shoot down, in dropdown order. These are the kill types.
+    # `key` is what a kill report stores: never change a key once reports exist, it would orphan
+    # their history. `label` is shown on the dropdown and the kill board, `description` is the hint.
+    colonial_planes:
+      - key: toxot
+        label: Toxot-902
+        description: Toxot-902 “Blind Silver” (Fighter)
+      - key: harpy
+        label: Harpy
+        description: Daimon aK-5 “Harpy” (Heavy Fighter)
+      - key: myrmidon
+        label: Myrmidon
+        description: Mergo-4 “Myrmidon” (Dive Bomber)
+      - key: pegasus
+        label: Pegasus
+        description: V-5b Pegasus (Paratrooper Plane)
+      - key: tzykalia
+        label: Tzykalia
+        description: Tzykalia (Heavy Bomber)
+
+    # Our own aircraft, in dropdown order: what depots stock and pilots check out.
+    # `label` is what a plane stores, so don't rename one once planes exist (stock stored under the
+    # older "Name (Role)" form still counts toward it). `role` is shown in brackets after the label.
+    warden_planes:
+      - key: harbinger
+        label: Harbinger
+        role: Fighter
+        description: Harbinger (Fighter)
+      - key: welkinrive
+        label: Welkinrive
+        role: Heavy Bomber
+        description: Welkinrive (Heavy Bomber)
+      - key: austringer
+        label: Austringer
+        role: Torpedo Bomber
+        description: Austringer (Torpedo Bomber)
+      - key: zealot
+        label: Zealot
+        role: Paratrooper Transport
+        description: Zealot (Paratrooper Transport)
+      - key: white_raven
+        label: White Raven
+        role: SeaFighter
+        description: White Raven (SeaFighter)

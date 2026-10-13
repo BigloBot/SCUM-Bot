@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import yaml
 
 load_dotenv()
@@ -11,37 +11,18 @@ load_dotenv()
 # --- Domain Models ---
 
 class PlaneType(BaseModel):
+    """One aircraft: a kill type (colonial_planes) or one of our own (warden_planes)."""
     model_config = ConfigDict(frozen=True)
 
     key: str
     label: str
     description: str
-    name: Optional[str] = None
     role: Optional[str] = None
 
     @property
     def display_label(self) -> str:
-        """Returns the label with the role in brackets, e.g. 'Harbinger (Fighter)'."""
-        if self.role:
-            return f"{self.label} ({self.role})"
-        return self.label
-
-    def get(self, item: str, default=None):
-        val = getattr(self, item, None)
-        return val if val is not None else default
-
-    def __getitem__(self, item: str):
-        if item == "display_label":
-            return self.display_label
-        if item == "name":
-            return self.name or self.label.split(" (")[0]
-        if item == "role":
-            if self.role:
-                return self.role
-            if "(" in self.label and self.label.endswith(")"):
-                return self.label.split(" (")[-1][:-1]
-            return ""
-        return getattr(self, item)
+        """The label with the role in brackets, e.g. 'Harbinger (Fighter)'."""
+        return f"{self.label} ({self.role})" if self.role else self.label
 
 
 class AirfieldConfig(BaseModel):
@@ -90,22 +71,13 @@ class AppConfig(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     features: FeatureConfig = Field(default_factory=FeatureConfig)
 
-    # Dynamic Lookup Caches
-    _colonial_planes_by_key: dict[str, PlaneType] = PrivateAttr(default_factory=dict)
-    _warden_planes_by_key: dict[str, PlaneType] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, __context):
-        """Build fast lookup dictionaries after loading."""
-        self._colonial_planes_by_key = {p.key: p for p in self.features.airfield.colonial_planes}
-        self._warden_planes_by_key = {p.key: p for p in self.features.airfield.warden_planes}
-
     @property
     def colonial_planes_by_key(self) -> dict[str, PlaneType]:
-        return self._colonial_planes_by_key
+        return self.features.airfield.colonial_planes_by_key
 
     @property
     def warden_planes_by_key(self) -> dict[str, PlaneType]:
-        return self._warden_planes_by_key
+        return self.features.airfield.warden_planes_by_key
 
 
 # --- Loader Function ---
@@ -151,35 +123,13 @@ def load_config(file_path: str | Path | None = None) -> AppConfig:
 
 
 def reload_config(file_path: str | Path | None = None) -> AppConfig:
-    """Reloads config from disk and updates the global instance."""
-    global config
+    """Reloads config from disk and updates the global instance in place. Raises (leaving it untouched) if invalid."""
     new_config = load_config(file_path)
     config.bot = new_config.bot
     config.database = new_config.database
     config.features = new_config.features
-    config.model_post_init(None)
     return config
 
 
 # Instantiate globally
 config: AppConfig = load_config()
-
-
-# --- Backwards Compatibility Shim ---
-
-class _ConfigCompat:
-    """Provides backwards-compatible access to the legacy Config class attributes."""
-    @property
-    def DISCORD_TOKEN(self) -> str:
-        return config.bot.token
-
-    @property
-    def COMMAND_PREFIX(self) -> str:
-        return config.bot.command_prefix
-
-    @property
-    def DATABASE_PATH(self) -> str:
-        return config.database.path
-
-
-Config = _ConfigCompat()
