@@ -3,6 +3,7 @@ from discord import ui
 from app.libs.views import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
+from app.features.airfield.views.kill_admin import open_kill_fix
 from app.features.airfield.views.modals import CreateDepotModal
 from app.features.airfield.views.selects import DepotSelect, DestinationSelectView, open_kill_report
 from app.features.airfield.views.utils import finish_flight
@@ -88,3 +89,7 @@ class DepotManagementView(BaseView):
         view = BaseView()
         view.add_item(DepotSelect("delete"))
         await interaction.send("Select the depot to delete:", view=view)
+
+    @ui.button(label="Fix Kills", style=discord.ButtonStyle.secondary, custom_id="scum:fix_kills", row=1)
+    async def fix_kills(self, interaction: discord.Interaction, button: ui.Button):
+        await open_kill_fix(interaction)

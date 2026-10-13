@@ -251,6 +251,52 @@ class AirfieldRepository:
         return report_id
 
     @staticmethod
+    def get_pilot_kill_entries(user_id: str, war_number: int = None, limit: int = 25):
+        """A pilot's kill report entries for a war (one row per report and kill type), newest first."""
+        if war_number is None:
+            war_number = settings.get_active_war()
+        with get_db() as conn:
+            return conn.execute(
+                """
+                SELECT r.id AS report_id, i.kill_type, i.count, r.created_at
+                FROM kill_reports r JOIN kill_report_items i ON i.report_id = r.id
+                WHERE r.war_number = ? AND r.user_id = ?
+                ORDER BY r.id DESC, i.kill_type
+                LIMIT ?
+                """,
+                (war_number, str(user_id), limit)
+            ).fetchall()
+
+    @staticmethod
+    def set_kill_entry_count(report_id: int, kill_type: str, count: int) -> bool:
+        """Corrects how many of a kill type a report holds. False if that entry no longer exists."""
+        if count < 1:
+            raise ValueError("count must be at least 1")
+        with get_db() as conn:
+            cursor = conn.execute(
+                "UPDATE kill_report_items SET count = ? WHERE report_id = ? AND kill_type = ?",
+                (count, report_id, kill_type)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def delete_kill_entry(report_id: int, kill_type: str) -> bool:
+        """Removes a kill report entry (and its report once it has no entries left). False if already gone."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM kill_report_items WHERE report_id = ? AND kill_type = ?",
+                (report_id, kill_type)
+            )
+            conn.execute(
+                "DELETE FROM kill_reports WHERE id = ? AND NOT EXISTS "
+                "(SELECT 1 FROM kill_report_items WHERE report_id = ?)",
+                (report_id, report_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
     def get_kill_board(war_number: int = None, pilot_limit: int = 10):
         """Kill reports of a war: totals per kill type and a pilot leaderboard with each pilot's kills by type."""
         if war_number is None:
