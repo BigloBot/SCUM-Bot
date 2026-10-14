@@ -1,7 +1,8 @@
 """Airfield dashboard composition and ordering policy."""
 import discord
 
-from app.features.airfield.embeds import build_kill_board_embed, build_panel_embed
+from app.features.airfield.views.depot.embeds import build_panel_embed
+from app.features.airfield.views.kills.embeds import build_kill_board_embed
 from app.features.airfield.repository import AirfieldRepository
 from app.libs.discord.panels import PersistentPanel
 
@@ -12,12 +13,12 @@ BOARD_MESSAGE_KEY = "kills_message_id"
 
 
 def build_controls_view():
-    from app.features.airfield.views.management import DepotManagementView
+    from app.features.airfield.views.depot.controls import DepotManagementView
     return DepotManagementView()
 
 
 def build_kill_board_view():
-    from app.features.airfield.views.killboard import KillBoardView
+    from app.features.airfield.views.kills.controls import KillBoardView
     return KillBoardView()
 
 controls_panel = PersistentPanel(

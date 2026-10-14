@@ -4,8 +4,8 @@ from discord.ext import commands
 from app.core.config import config
 from app.core.root import register_root
 from app.features.airfield.cog import register as register_airfield
-from app.features.airfield.views.management import DepotManagementView
-from app.features.airfield.views.killboard import KillBoardView
+from app.features.airfield.views.depot.controls import DepotManagementView
+from app.features.airfield.views.kills.controls import KillBoardView
 from app.features.bank.cog import register as register_bank
 from app.features.bank.views import BankControlView
 
