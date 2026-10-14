@@ -72,10 +72,18 @@ def join_natural(parts: list[str]) -> str:
     return ", ".join(parts[:-1]) + f", and {parts[-1]}"
 
 
-async def finish_flight(interaction: discord.Interaction, status: str, destination_id: int = None):
+def quote(text: str) -> str:
+    """Formats pilot-written text as a Discord block quote."""
+    return "\n".join(f"> {line}" for line in text.strip().splitlines() if line.strip())
+
+
+async def finish_flight(
+        interaction: discord.Interaction, status: str, destination_id: int = None, cause: str = None
+):
     """
     Closes the pilot's active flight and logs it in the depot thread(s). `status` is 'Returned' or 'Loss'.
     A returned Transport flight moves the aircraft to `destination_id`; any other return restocks the source depot.
+    For a loss, `cause` is how the pilot says they died; it goes into the depot thread log.
     """
     flight = AirfieldRepository.get_user_active_flight(str(interaction.user.id))
     if not flight:
@@ -96,7 +104,10 @@ async def finish_flight(interaction: discord.Interaction, status: str, destinati
 
     if status != "Returned":
         await interaction.send(f"Flight logged: **{plane_type}** lost.")
-        await log_to_depot_thread(interaction.guild, flight["airfield_id"], f"💥 {mention} has marked {plane} as lost.")
+        entry = f"💥 {mention} has marked {plane} as lost."
+        if cause and quote(cause):
+            entry += f"\n**How they died:**\n{quote(cause)}"
+        await log_to_depot_thread(interaction.guild, flight["airfield_id"], entry)
         return
 
     if destination_id is not None and destination_id != flight["airfield_id"]:

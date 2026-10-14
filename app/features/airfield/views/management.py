@@ -4,7 +4,7 @@ from app.libs.views import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.views.kill_admin import open_kill_fix
-from app.features.airfield.views.modals import CreateDepotModal
+from app.features.airfield.views.modals import CreateDepotModal, LossCauseModal
 from app.features.airfield.views.selects import DepotSelect, DestinationSelectView, open_kill_report
 from app.features.airfield.views.utils import finish_flight
 
@@ -27,7 +27,10 @@ class FlightReturnStatusView(BaseView):
 
     @ui.button(label="Loss", style=discord.ButtonStyle.danger, emoji="💥")
     async def loss(self, interaction: discord.Interaction, button: ui.Button):
-        await finish_flight(interaction, "Loss")
+        if not AirfieldRepository.get_user_active_flight(str(interaction.user.id)):
+            await interaction.send("You don't have an active flight to log.")
+            return
+        await interaction.response.send_modal(LossCauseModal())
 
 
 class DepotFlightView(BaseView):

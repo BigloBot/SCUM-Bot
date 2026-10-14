@@ -9,6 +9,7 @@ from app.features.airfield.service import format_depot_thread_title
 from app.features.airfield.views.utils import (
     article,
     checkout_and_log,
+    finish_flight,
     join_natural,
     log_to_depot_thread,
 )
@@ -94,3 +95,27 @@ class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission")
 
     async def on_submit(self, interaction: discord.Interaction):
         await checkout_and_log(interaction, self.airfield_id, self.plane_type, self.usecase.value.strip())
+
+
+MAX_CAUSE_LENGTH = 300
+
+
+class LossCauseModal(BaseModal, title="Log Loss"):
+    """Asked when a pilot reports losing their aircraft: how they died, which goes into the depot thread log."""
+    def __init__(self):
+        super().__init__()
+        self.cause = ui.TextInput(
+            label="How did you die?",
+            placeholder="e.g. Shot down by a Toxot over Callahan's Passage",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=MAX_CAUSE_LENGTH,
+        )
+        self.add_item(self.cause)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cause = self.cause.value.strip()
+        if not cause:
+            await interaction.send("Tell us how you died so the loss can be logged. Press Loss to try again.")
+            return
+        await finish_flight(interaction, "Loss", cause=cause)
