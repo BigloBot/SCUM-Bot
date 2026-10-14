@@ -1,0 +1,1 @@
+"""Depot and flight Discord UI."""
