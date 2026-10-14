@@ -8,7 +8,7 @@ from app.core.permissions import has_admin
 from app.features.airfield.dashboard import refresh_control_panel
 from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY, can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.stats import build_stats_embed
+from app.features.airfield.stats import build_production_embed, build_stats_embed
 
 
 def register(bot: commands.Bot, scum: commands.HybridGroup):
@@ -19,10 +19,10 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
     @scum.group(name="airfield", description="Airfield depots, stockpiles and flights.")
     async def airfield(ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await ctx.send("Try `/scum airfield stats` or `/scum airfield config`. Flights, kills and depots are managed with the controls in the controls channel.", ephemeral=True)
+            await ctx.send("Try `/scum airfield stats` (pilots and production) or `/scum airfield config`. Flights, kills and depots are managed with the controls in the controls channel.", ephemeral=True)
 
     # ==================== STATS ====================
-    @airfield.command(name="stats", description="Pilot kill/death and flight/death ratios, and who loses the most planes.")
+    @airfield.command(name="stats", description="Top aces, busiest pilots and aircraft production for a war.")
     @app_commands.describe(war="War to show (defaults to the active war).")
     @commands.guild_only()
     async def stats(ctx: commands.Context, war: Optional[int] = None):
@@ -31,7 +31,10 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
             return
         war = war if war is not None else settings.get_active_war()
         await ctx.send(
-            embed=build_stats_embed(war, AirfieldRepository.get_pilot_stats(war)),
+            embeds=[
+                build_stats_embed(war, AirfieldRepository.get_pilot_stats(war)),
+                build_production_embed(war, AirfieldRepository.get_production_stats(war), AirfieldRepository.get_aircraft_types()),
+            ],
             ephemeral=True
         )
 

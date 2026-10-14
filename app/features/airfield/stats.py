@@ -1,5 +1,6 @@
-"""Pilot statistics: top aces by kills (with K:D) and busiest pilots by sorties (with F/D)."""
+"""Airfield statistics: top aces by kills (with K:D), busiest pilots by sorties (with F/D), and production."""
 import discord
+from app.features.airfield.views.depot.embeds import summarize_stock
 
 TOP_N = 10
 MEDALS = ["🥇", "🥈", "🥉"]
@@ -74,4 +75,29 @@ def build_stats_embed(war: int, stats: list[dict]) -> discord.Embed:
         value=_field_value(ranked["busiest_pilots"], _sorties_line) if ranked["busiest_pilots"] else "No sorties finished yet.",
         inline=False
     )
+    return embed
+
+
+def build_production_embed(war: int, production: dict, planes) -> discord.Embed:
+    """Aircraft added to stock this war: total, per aircraft (configured order, legacy labels folded in), top producers."""
+    embed = discord.Embed(title=f"Production Stats - War {war}", color=discord.Color.green())
+    if not production["total"]:
+        embed.description = "No aircraft have been added to stock yet this war."
+        return embed
+
+    embed.description = (
+        f"**{production['total']}** aircraft added to depot stock this war. "
+        "Aircraft returning from a flight or moved by a transport aren't counted."
+    )
+    by_type = summarize_stock(production["by_type"], planes)
+    embed.add_field(
+        name="Produced by aircraft",
+        value="\n".join(f"{name}: **{count}**" for name, count in by_type)[:1024],
+        inline=False
+    )
+    lines = []
+    for i, producer in enumerate(production["producers"]):
+        rank = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
+        lines.append(f"{rank} <@{producer['user_id']}> - **{producer['count']}** aircraft")
+    embed.add_field(name="Top Producers", value="\n".join(lines)[:1024], inline=False)
     return embed

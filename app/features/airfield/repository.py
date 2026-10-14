@@ -421,6 +421,38 @@ class AirfieldRepository:
             pilots[row["user_id"]]["deaths"] = row["deaths"]
         return list(pilots.values())
 
+    # added_by values that are not a pilot adding stock: aircraft that came back from a flight, and
+    # aircraft checked out that were never registered in stock.
+    _NOT_PRODUCTION = ("RETURNED", "UNREGISTERED")
+
+    @staticmethod
+    def get_production_stats(war_number: int = None, producer_limit: int = 10) -> dict:
+        """
+        Aircraft added to depot stock in a war (whatever happened to them since): totals per stored plane_type
+        and the pilots who added the most. Returned aircraft and unregistered checkouts are not production.
+        """
+        if war_number is None:
+            war_number = settings.get_active_war()
+        not_production = AirfieldRepository._NOT_PRODUCTION
+        with get_db() as conn:
+            by_type = conn.execute(
+                """
+                SELECT plane_type, COUNT(*) AS count FROM plane_instances
+                WHERE war_number = ? AND added_by NOT IN (?, ?)
+                GROUP BY plane_type
+                """,
+                (war_number, *not_production)
+            ).fetchall()
+            producers = conn.execute(
+                """
+                SELECT added_by AS user_id, COUNT(*) AS count FROM plane_instances
+                WHERE war_number = ? AND added_by NOT IN (?, ?)
+                GROUP BY added_by ORDER BY count DESC, added_by LIMIT ?
+                """,
+                (war_number, *not_production, producer_limit)
+            ).fetchall()
+        return {"by_type": by_type, "producers": producers, "total": sum(r["count"] for r in by_type)}
+
     @staticmethod
     def set_config(key: str, value: str):
         settings.set_setting(key, value)
