@@ -330,7 +330,7 @@ class AirfieldRepository:
 
         def label(key: str) -> str:
             # A type removed from the config still shows up under its stored key.
-            return KILL_TYPES_BY_KEY[key].display_label if key in KILL_TYPES_BY_KEY else key
+            return KILL_TYPES_BY_KEY[key].label if key in KILL_TYPES_BY_KEY else key
 
         def position(key: str) -> int:
             return list(KILL_TYPES_BY_KEY).index(key) if key in KILL_TYPES_BY_KEY else len(KILL_TYPES_BY_KEY)

@@ -1,6 +1,6 @@
 import discord
 from discord import ui
-from app.libs.views import BaseView
+from app.libs.views.views import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.views.kill_admin import open_kill_fix
@@ -56,7 +56,7 @@ class DepotManagementView(BaseView):
             return
         await interaction.send("Select the depot you are taking an aircraft from:", view=DepotFlightView())
 
-    @ui.button(label="Log Return", style=discord.ButtonStyle.primary, custom_id="scum:return", row=0)
+    @ui.button(label="Log Flight", style=discord.ButtonStyle.primary, custom_id="scum:return", row=0)
     async def log_return(self, interaction: discord.Interaction, button: ui.Button):
         active_flight = AirfieldRepository.get_user_active_flight(str(interaction.user.id))
         if not active_flight:
@@ -71,15 +71,19 @@ class DepotManagementView(BaseView):
     async def report_kills(self, interaction: discord.Interaction, button: ui.Button):
         await open_kill_report(interaction)
 
+    @ui.button(label="Fix Kills", style=discord.ButtonStyle.secondary, custom_id="scum:fix_kills", row=0)
+    async def fix_kills(self, interaction: discord.Interaction, button: ui.Button):
+        await open_kill_fix(interaction)
+
     @ui.button(label="Create Depot", style=discord.ButtonStyle.secondary, custom_id="scum:create_depot", row=1)
     async def create_depot(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(CreateDepotModal())
 
-    @ui.button(label="Add Stock", style=discord.ButtonStyle.secondary, custom_id="scum:add_stock", row=1)
+    @ui.button(label="Submit Plane", style=discord.ButtonStyle.secondary, custom_id="scum:add_stock", row=1)
     async def add_stock(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(DepotSelect("add_stock"))
-        await interaction.send("Select the depot to add stock to:", view=view)
+        await interaction.send("Select aircraft depot:", view=view)
 
     @ui.button(label="View Depots", style=discord.ButtonStyle.secondary, custom_id="scum:view_depots", row=1)
     async def view_depots(self, interaction: discord.Interaction, button: ui.Button):
@@ -92,7 +96,3 @@ class DepotManagementView(BaseView):
         view = BaseView()
         view.add_item(DepotSelect("delete"))
         await interaction.send("Select the depot to delete:", view=view)
-
-    @ui.button(label="Fix Kills", style=discord.ButtonStyle.secondary, custom_id="scum:fix_kills", row=1)
-    async def fix_kills(self, interaction: discord.Interaction, button: ui.Button):
-        await open_kill_fix(interaction)

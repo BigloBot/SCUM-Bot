@@ -3,7 +3,7 @@ import logging
 import discord
 from app.features.airfield.panel import refresh_controls
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.threads import send_thread_message
+from app.libs.discord.threads import send_thread_message
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ MISSION_PRESETS = [
     "Large Ship Escort",
     "Heavy Bomber Escort",
     "Paratrooper Deployment",
-    "Transport",
+    "Plane Transfer",
     "QRF",
     "Other"
 ]

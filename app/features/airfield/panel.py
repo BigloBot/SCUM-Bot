@@ -19,7 +19,7 @@ def summarize_stock(rows, planes) -> list[tuple[str, int]]:
     for plane in planes:
         legacy = [k for k in counts if k.startswith(f"{plane.label} (")]
         total = counts.pop(plane.label, 0) + sum(counts.pop(k) for k in legacy)
-        summary.append((plane.display_label, total))
+        summary.append((plane.label, total))
     summary.extend(sorted(counts.items()))
     return summary
 

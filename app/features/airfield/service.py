@@ -2,7 +2,7 @@
 import asyncio
 import discord
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.threads import send_thread_message, update_thread_state
+from app.libs.discord.threads import send_thread_message, update_thread_state
 
 MAX_THREAD_NAME = 100
 

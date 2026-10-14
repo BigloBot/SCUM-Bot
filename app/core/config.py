@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from typing import Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 import yaml
@@ -17,13 +16,6 @@ class PlaneType(BaseModel):
     key: str
     label: str
     description: str
-    role: Optional[str] = None
-
-    @property
-    def display_label(self) -> str:
-        """The label with the role in brackets, e.g. 'Harbinger (Fighter)'."""
-        return f"{self.label} ({self.role})" if self.role else self.label
-
 
 class AirfieldConfig(BaseModel):
     colonial_planes: list[PlaneType] = Field(default_factory=list)
