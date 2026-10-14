@@ -352,6 +352,44 @@ class AirfieldRepository:
         }
 
     @staticmethod
+    def get_pilot_stats(war_number: int = None) -> list[dict]:
+        """
+        Per pilot for a war: kills (from kill reports), flights (finished sorties, losses included) and deaths
+        (sorties logged as a Loss). Pilots with only kills or only flights are included.
+        """
+        if war_number is None:
+            war_number = settings.get_active_war()
+        with get_db() as conn:
+            kill_rows = conn.execute(
+                """
+                SELECT r.user_id, SUM(i.count) AS kills
+                FROM kill_reports r JOIN kill_report_items i ON i.report_id = r.id
+                WHERE r.war_number = ?
+                GROUP BY r.user_id
+                """,
+                (war_number,)
+            ).fetchall()
+            flight_rows = conn.execute(
+                """
+                SELECT removed_by AS user_id, COUNT(*) AS flights, SUM(status = 'Loss') AS deaths
+                FROM plane_instances
+                WHERE war_number = ? AND status IN ('Returned', 'Loss') AND removed_by IS NOT NULL
+                GROUP BY removed_by
+                """,
+                (war_number,)
+            ).fetchall()
+
+        pilots: dict[str, dict] = {}
+        for row in kill_rows:
+            pilots.setdefault(row["user_id"], {"user_id": row["user_id"], "kills": 0, "flights": 0, "deaths": 0})
+            pilots[row["user_id"]]["kills"] = row["kills"]
+        for row in flight_rows:
+            pilots.setdefault(row["user_id"], {"user_id": row["user_id"], "kills": 0, "flights": 0, "deaths": 0})
+            pilots[row["user_id"]]["flights"] = row["flights"]
+            pilots[row["user_id"]]["deaths"] = row["deaths"]
+        return list(pilots.values())
+
+    @staticmethod
     def set_config(key: str, value: str):
         settings.set_setting(key, value)
 

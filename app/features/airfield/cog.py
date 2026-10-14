@@ -6,19 +6,34 @@ from discord.ext import commands
 from app.core import settings
 from app.core.permissions import has_admin
 from app.features.airfield.panel import refresh_control_panel
-from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY
+from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY, can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
+from app.features.airfield.stats import build_stats_embed
 
 
 def register(bot: commands.Bot, scum: commands.HybridGroup):
-    # Only settings live here: everything pilots do has a button on the permanent controls message.
+    # Pilot actions all have a button on the permanent controls message; only stats and settings are commands.
     # Everything lives under /scum airfield. Discord only applies command visibility to top-level
     # commands, so /scum stays visible to everyone and permissions are enforced when a command runs.
 
     @scum.group(name="airfield", description="Airfield depots, stockpiles and flights.")
     async def airfield(ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await ctx.send("Try `/scum airfield config`. Flights, kills and depots are managed with the controls in the controls channel.", ephemeral=True)
+            await ctx.send("Try `/scum airfield stats` or `/scum airfield config`. Flights, kills and depots are managed with the controls in the controls channel.", ephemeral=True)
+
+    # ==================== STATS ====================
+    @airfield.command(name="stats", description="Pilot kill/death and flight/death ratios, and who loses the most planes.")
+    @app_commands.describe(war="War to show (defaults to the active war).")
+    @commands.guild_only()
+    async def stats(ctx: commands.Context, war: Optional[int] = None):
+        if not can_use_airfield(ctx.author):
+            await ctx.send("You don't have permission to use airfield commands.", ephemeral=True)
+            return
+        war = war if war is not None else settings.get_active_war()
+        await ctx.send(
+            embed=build_stats_embed(war, AirfieldRepository.get_pilot_stats(war)),
+            ephemeral=True
+        )
 
     # ==================== ADMIN CONFIG ====================
     @airfield.command(name="config", description="View or change airfield settings (admins only).")
