@@ -40,6 +40,23 @@ class AirfieldConfig(BaseModel):
     def warden_planes_by_key(self) -> dict[str, PlaneType]:
         return {p.key: p for p in self.warden_planes}
 
+    # --- Kill types: the colonial planes pilots can report shooting down ---
+
+    @property
+    def kill_types(self) -> list[PlaneType]:
+        """The kill types in dropdown order."""
+        return self.colonial_planes
+
+    def kill_type_label(self, key: str) -> str:
+        """Display name for a stored kill type key. A type later removed from the config shows under its key."""
+        plane = self.colonial_planes_by_key.get(key)
+        return plane.label if plane else key
+
+    def kill_type_position(self, key: str) -> int:
+        """Sort position of a stored kill type key; keys no longer in the config sort last."""
+        keys = [p.key for p in self.colonial_planes]
+        return keys.index(key) if key in keys else len(keys)
+
 
 class FeatureConfig(BaseModel):
     airfield: AirfieldConfig = Field(default_factory=AirfieldConfig)

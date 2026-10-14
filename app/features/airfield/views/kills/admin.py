@@ -3,7 +3,7 @@ import logging
 import discord
 from discord import ui
 from app.core.permissions import is_admin
-from app.features.airfield.kill_types import KILL_TYPES_BY_KEY
+from app.core.config import config
 from app.features.airfield.dashboard import refresh_kill_board
 from app.features.airfield.repository import AirfieldRepository
 from app.libs.modals import BaseModal
@@ -15,8 +15,7 @@ MAX_KILL_COUNT = 999  # the correction form allows three digits
 
 
 def _type_label(kill_type: str) -> str:
-    # A type removed from the config still shows under its stored key.
-    return KILL_TYPES_BY_KEY[kill_type].label if kill_type in KILL_TYPES_BY_KEY else kill_type
+    return config.features.airfield.kill_type_label(kill_type)
 
 
 def _entry_label(entry) -> str:

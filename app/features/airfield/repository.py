@@ -1,7 +1,6 @@
 from app.core import settings
 from app.core.config import PlaneType, config
 from app.core.database import get_db
-from app.features.airfield.kill_types import KILL_TYPES, KILL_TYPES_BY_KEY, KillType
 
 class AirfieldRepository:
     @staticmethod
@@ -240,9 +239,9 @@ class AirfieldRepository:
         return flight
 
     @staticmethod
-    def get_kill_types() -> list[KillType]:
-        """The configured kill types, in display order (see kill_types.py)."""
-        return list(KILL_TYPES)
+    def get_kill_types() -> list[PlaneType]:
+        """The configured kill types, in display order (colonial_planes in config.yaml)."""
+        return list(config.features.airfield.kill_types)
 
     @staticmethod
     def get_user_active_flight_in_war(user_id: str, war_number: int = None):
@@ -277,7 +276,7 @@ class AirfieldRepository:
     @staticmethod
     def add_kill_report(user_id: str, counts: dict[str, int], flight_id: int | None = None) -> int | None:
         """Record valid kills, optionally binding them to a flight owned by this pilot in the active war."""
-        counts = {key: int(n) for key, n in counts.items() if key in KILL_TYPES_BY_KEY and int(n) > 0}
+        counts = {key: int(n) for key, n in counts.items() if key in config.colonial_planes_by_key and int(n) > 0}
         if not counts:
             return None
 
@@ -364,14 +363,11 @@ class AirfieldRepository:
                 (war_number,)
             ).fetchall()
 
-        def label(key: str) -> str:
-            # A type removed from the config still shows up under its stored key.
-            return KILL_TYPES_BY_KEY[key].label if key in KILL_TYPES_BY_KEY else key
+        kill_config = config.features.airfield
+        label = kill_config.kill_type_label  # a type removed from the config still shows under its stored key
+        position = kill_config.kill_type_position
 
-        def position(key: str) -> int:
-            return list(KILL_TYPES_BY_KEY).index(key) if key in KILL_TYPES_BY_KEY else len(KILL_TYPES_BY_KEY)
-
-        totals = {t.key: 0 for t in KILL_TYPES}
+        totals = {t.key: 0 for t in kill_config.kill_types}
         pilots: dict[str, dict] = {}
         for row in rows:
             totals[row["kill_type"]] = totals.get(row["kill_type"], 0) + row["kills"]
