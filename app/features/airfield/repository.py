@@ -430,6 +430,7 @@ class AirfieldRepository:
         """
         Aircraft added to depot stock in a war (whatever happened to them since): totals per stored plane_type
         and the pilots who added the most. Returned aircraft and unregistered checkouts are not production.
+        Also the aircraft lost in the war (flights logged as a Loss), per stored plane_type, whoever added them.
         """
         if war_number is None:
             war_number = settings.get_active_war()
@@ -451,7 +452,21 @@ class AirfieldRepository:
                 """,
                 (war_number, *not_production, producer_limit)
             ).fetchall()
-        return {"by_type": by_type, "producers": producers, "total": sum(r["count"] for r in by_type)}
+            lost_by_type = conn.execute(
+                """
+                SELECT plane_type, COUNT(*) AS count FROM plane_instances
+                WHERE war_number = ? AND status = 'Loss'
+                GROUP BY plane_type
+                """,
+                (war_number,)
+            ).fetchall()
+        return {
+            "by_type": by_type,
+            "lost_by_type": lost_by_type,
+            "producers": producers,
+            "total": sum(r["count"] for r in by_type),
+            "lost": sum(r["count"] for r in lost_by_type),
+        }
 
     @staticmethod
     def set_config(key: str, value: str):

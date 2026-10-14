@@ -78,26 +78,43 @@ def build_stats_embed(war: int, stats: list[dict]) -> discord.Embed:
     return embed
 
 
-def build_production_embed(war: int, production: dict, planes) -> discord.Embed:
-    """Aircraft added to stock this war: total, per aircraft (configured order, legacy labels folded in), top producers."""
+def build_production_embed(war: int, production: dict, planes, active_war: int) -> discord.Embed:
+    """
+    Aircraft commissioned into the air fleet in a war, with losses: a summary, a per-aircraft breakdown
+    (configured order, legacy labels folded in) and the top producers. Past wars are worded in the past tense.
+    """
     embed = discord.Embed(title=f"Production Stats - War {war}", color=discord.Color.green())
-    if not production["total"]:
-        embed.description = "No aircraft have been added to stock yet this war."
+    total, lost = production["total"], production["lost"]
+    if not total and not lost:
+        embed.description = (
+            "No aircraft have been added to the SCUM air fleet yet this war." if war == active_war
+            else f"No aircraft were added to the SCUM air fleet during War {war}."
+        )
         return embed
 
+    if war == active_war:
+        have_been = "has been" if total == 1 else "have been"
+        commissioned = f"**{total}** aircraft {have_been} commissioned into the SCUM air fleet this war"
+        losses = "none have been lost" if not lost else f"**{lost}** {'has' if lost == 1 else 'have'} been lost"
+    else:
+        was = "was" if total == 1 else "were"
+        commissioned = f"**{total}** aircraft {was} commissioned into the SCUM air fleet during War {war}"
+        losses = "none were lost" if not lost else f"**{lost}** {'was' if lost == 1 else 'were'} lost"
     embed.description = (
-        f"**{production['total']}** aircraft added to depot stock this war. "
-        "Aircraft returning from a flight or moved by a transport aren't counted."
+        f"{commissioned}, and {losses}.\n"
+        "*Aircraft returning from a flight or moved by a transport aren't counted as new.*"
     )
-    by_type = summarize_stock(production["by_type"], planes)
-    embed.add_field(
-        name="Produced by aircraft",
-        value="\n".join(f"{name}: **{count}**" for name, count in by_type)[:1024],
-        inline=False
-    )
-    lines = []
-    for i, producer in enumerate(production["producers"]):
-        rank = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
-        lines.append(f"{rank} <@{producer['user_id']}> - **{producer['count']}** aircraft")
-    embed.add_field(name="Top Producers", value="\n".join(lines)[:1024], inline=False)
+
+    produced = dict(summarize_stock(production["by_type"], planes))
+    lost_by_type = dict(summarize_stock(production["lost_by_type"], planes))
+    names = list(produced) + [n for n in lost_by_type if n not in produced]
+    lines = [f"{name}: **{produced.get(name, 0)}** commissioned · **{lost_by_type.get(name, 0)}** lost" for name in names]
+    embed.add_field(name="By aircraft", value="\n".join(lines)[:1024], inline=False)
+
+    if production["producers"]:
+        lines = []
+        for i, producer in enumerate(production["producers"]):
+            rank = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
+            lines.append(f"{rank} <@{producer['user_id']}> - **{producer['count']}** aircraft")
+        embed.add_field(name="Top Producers", value="\n".join(lines)[:1024], inline=False)
     return embed

@@ -33,7 +33,10 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
         await ctx.send(
             embeds=[
                 build_stats_embed(war, AirfieldRepository.get_pilot_stats(war)),
-                build_production_embed(war, AirfieldRepository.get_production_stats(war), AirfieldRepository.get_aircraft_types()),
+                build_production_embed(
+                    war, AirfieldRepository.get_production_stats(war), AirfieldRepository.get_aircraft_types(),
+                    settings.get_active_war()
+                ),
             ],
             ephemeral=True
         )
