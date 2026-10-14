@@ -11,6 +11,9 @@ from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.stats import build_production_embed, build_stats_embed
 
 
+STATS_VISIBLE_SECONDS = 120  # how long the stats reply stays up before it deletes itself
+
+
 def register(bot: commands.Bot, scum: commands.HybridGroup):
     # Pilot actions all have a button on the permanent controls message; only stats and settings are commands.
     # Everything lives under /scum airfield. Discord only applies command visibility to top-level
@@ -30,16 +33,18 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
             await ctx.send("You don't have permission to use airfield commands.", ephemeral=True)
             return
         war = war if war is not None else settings.get_active_war()
-        await ctx.send(
-            embeds=[
-                build_stats_embed(war, AirfieldRepository.get_pilot_stats(war)),
-                build_production_embed(
-                    war, AirfieldRepository.get_production_stats(war), AirfieldRepository.get_aircraft_types(),
-                    settings.get_active_war()
-                ),
-            ],
-            ephemeral=True
-        )
+        embeds = [
+            build_stats_embed(war, AirfieldRepository.get_pilot_stats(war)),
+            build_production_embed(
+                war, AirfieldRepository.get_production_stats(war), AirfieldRepository.get_aircraft_types(),
+                settings.get_active_war()
+            ),
+        ]
+        # Private reply that deletes itself, like the other airfield replies (two embeds take a while to read).
+        if ctx.interaction is not None:
+            await ctx.interaction.send(embeds=embeds, delete_after=STATS_VISIBLE_SECONDS)
+        else:
+            await ctx.send(embeds=embeds, delete_after=STATS_VISIBLE_SECONDS)
 
     # ==================== ADMIN CONFIG ====================
     @airfield.command(name="config", description="View or change airfield settings (admins only).")
