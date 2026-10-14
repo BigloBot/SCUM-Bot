@@ -245,18 +245,54 @@ class AirfieldRepository:
         return list(KILL_TYPES)
 
     @staticmethod
-    def add_kill_report(user_id: str, counts: dict[str, int]) -> int | None:
-        """
-        Records kills reported by a pilot, independent of any flight. `counts` maps kill type key to kills.
-        Returns the new report's id, or None if nothing valid was reported.
-        """
+    def get_user_active_flight_in_war(user_id: str, war_number: int = None):
+        """Return the pilot's active flight for one war, if any."""
+        war_number = war_number if war_number is not None else settings.get_active_war()
+        with get_db() as conn:
+            return conn.execute(
+                """
+                SELECT id, plane_type, status, usecase
+                FROM plane_instances
+                WHERE war_number = ? AND removed_by = ? AND status = 'CHECKED_OUT'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (war_number, str(user_id)),
+            ).fetchone()
+
+    @staticmethod
+    def get_user_latest_completed_flight(user_id: str, war_number: int = None):
+        """Return the pilot's most recently completed flight for one war, if any."""
+        war_number = war_number if war_number is not None else settings.get_active_war()
+        with get_db() as conn:
+            return conn.execute(
+                """
+                SELECT id, plane_type, status, usecase, completed_at
+                FROM plane_instances
+                WHERE war_number = ? AND removed_by = ? AND status IN ('Returned', 'Loss')
+                ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 1
+                """,
+                (war_number, str(user_id)),
+            ).fetchone()
+
+    @staticmethod
+    def add_kill_report(user_id: str, counts: dict[str, int], flight_id: int | None = None) -> int | None:
+        """Record valid kills, optionally binding them to a flight owned by this pilot in the active war."""
         counts = {key: int(n) for key, n in counts.items() if key in KILL_TYPES_BY_KEY and int(n) > 0}
         if not counts:
             return None
+
+        war_number = settings.get_active_war()
         with get_db() as conn:
+            if flight_id is not None:
+                flight = conn.execute(
+                    "SELECT id FROM plane_instances WHERE id = ? AND war_number = ? AND removed_by = ?",
+                    (flight_id, war_number, str(user_id)),
+                ).fetchone()
+                if flight is None:
+                    raise ValueError("flight is no longer available for this report")
             cursor = conn.execute(
-                "INSERT INTO kill_reports (war_number, user_id) VALUES (?, ?)",
-                (settings.get_active_war(), str(user_id))
+                "INSERT INTO kill_reports (war_number, user_id, flight_id) VALUES (?, ?, ?)",
+                (war_number, str(user_id), flight_id),
             )
             report_id = cursor.lastrowid
             conn.executemany(

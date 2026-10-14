@@ -57,10 +57,10 @@ def build_board_embed() -> discord.Embed:
 
         field_value = (
             f"🔑 **Code:** `{stockpile['code']}` | 📍 **Location:** {stockpile['location']}\n"
-            f"```yaml\n"
-            f"Materials:\n"
+            f"\n"
+            f"**Materials:**\n"
             f"{materials_text}\n"
-            f"```"
+            f"\n"
         )
         embed.add_field(name=f"📦 {stockpile['name']}", value=field_value, inline=False)
 

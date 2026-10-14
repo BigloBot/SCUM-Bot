@@ -1,7 +1,8 @@
 import discord
 from discord import ui
+from app.libs.modals import BaseModal, FacilityModal
 from app.libs.views.views import (
-    AMOUNT_PATTERN, BaseModal, BaseView, FacilityModal, FacilitySelect, respond_or_followup
+    AMOUNT_PATTERN, BaseView, FacilitySelect, respond_or_followup
 )
 from app.features.bank.board import sync_stockpile_board  # Updated to sync the unified board
 from app.features.bank.permissions import can_use_bank

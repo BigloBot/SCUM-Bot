@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import discord
-from app.features.airfield.panel import refresh_controls
+from app.features.airfield.dashboard import refresh_controls
 from app.features.airfield.repository import AirfieldRepository
 from app.libs.discord.threads import send_thread_message
 

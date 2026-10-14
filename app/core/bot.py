@@ -5,6 +5,7 @@ from app.core.config import config
 from app.core.root import register_root
 from app.features.airfield.cog import register as register_airfield
 from app.features.airfield.views.management import DepotManagementView
+from app.features.airfield.views.killboard import KillBoardView
 from app.features.bank.cog import register as register_bank
 from app.features.bank.views import BankControlView
 
@@ -25,6 +26,7 @@ class ScumBot(commands.Bot):
     async def setup_hook(self):
         """Re-registers the persistent control panel buttons, then syncs the command tree with Discord."""
         self.add_view(DepotManagementView())
+        self.add_view(KillBoardView())
         self.add_view(BankControlView())
         await self.tree.sync()
         print("[+] Discord command tree synced successfully.")

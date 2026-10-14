@@ -3,9 +3,8 @@ from discord import ui
 from app.libs.views.views import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
-from app.features.airfield.views.kill_admin import open_kill_fix
 from app.features.airfield.views.modals import CreateDepotModal, LossCauseModal
-from app.features.airfield.views.selects import DepotSelect, DestinationSelectView, open_kill_report
+from app.features.airfield.views.selects import DepotSelect, DestinationSelectView
 from app.features.airfield.views.utils import finish_flight
 
 class FlightReturnStatusView(BaseView):
@@ -13,7 +12,7 @@ class FlightReturnStatusView(BaseView):
     def __init__(self, flight):
         super().__init__(timeout=180)
         self.airfield_id = flight["airfield_id"]
-        self.is_transport = (flight["usecase"] or "").strip().lower() == "transport"
+        self.is_transport = (flight["usecase"] or "").strip().lower() == "plane transfer"
 
     @ui.button(label="Returned", style=discord.ButtonStyle.green, emoji="🛬")
     async def returned(self, interaction: discord.Interaction, button: ui.Button):
@@ -56,7 +55,7 @@ class DepotManagementView(BaseView):
             return
         await interaction.send("Select the depot you are taking an aircraft from:", view=DepotFlightView())
 
-    @ui.button(label="Log Flight", style=discord.ButtonStyle.primary, custom_id="scum:return", row=0)
+    @ui.button(label="Log Flight Outcome", style=discord.ButtonStyle.primary, custom_id="scum:return", row=0)
     async def log_return(self, interaction: discord.Interaction, button: ui.Button):
         active_flight = AirfieldRepository.get_user_active_flight(str(interaction.user.id))
         if not active_flight:
@@ -66,14 +65,6 @@ class DepotManagementView(BaseView):
             f"Logging your **{active_flight['plane_type']}** flight. Select how it ended:",
             view=FlightReturnStatusView(active_flight)
         )
-
-    @ui.button(label="Report Kills", style=discord.ButtonStyle.secondary, custom_id="scum:report_kills", row=0)
-    async def report_kills(self, interaction: discord.Interaction, button: ui.Button):
-        await open_kill_report(interaction)
-
-    @ui.button(label="Fix Kills", style=discord.ButtonStyle.secondary, custom_id="scum:fix_kills", row=0)
-    async def fix_kills(self, interaction: discord.Interaction, button: ui.Button):
-        await open_kill_fix(interaction)
 
     @ui.button(label="Create Depot", style=discord.ButtonStyle.secondary, custom_id="scum:create_depot", row=1)
     async def create_depot(self, interaction: discord.Interaction, button: ui.Button):

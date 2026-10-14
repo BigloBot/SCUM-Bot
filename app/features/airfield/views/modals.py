@@ -2,8 +2,8 @@ import logging
 import discord
 from discord import ui
 from app.core import settings
-from app.libs.views.views import BaseModal, FacilityModal
-from app.features.airfield.panel import refresh_controls
+from app.libs.modals import BaseModal, FacilityModal
+from app.features.airfield.dashboard import refresh_controls
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.service import format_depot_thread_title
 from app.features.airfield.views.utils import (

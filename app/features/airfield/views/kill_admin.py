@@ -4,9 +4,10 @@ import discord
 from discord import ui
 from app.core.permissions import is_admin
 from app.features.airfield.kill_types import KILL_TYPES_BY_KEY
-from app.features.airfield.panel import refresh_kill_board
+from app.features.airfield.dashboard import refresh_kill_board
 from app.features.airfield.repository import AirfieldRepository
-from app.libs.views.views import BaseModal, BaseView
+from app.libs.modals import BaseModal
+from app.libs.views.views import BaseView
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 from app.core import settings
 from app.core.permissions import has_admin
-from app.features.airfield.panel import refresh_control_panel
+from app.features.airfield.dashboard import refresh_control_panel
 from app.features.airfield.permissions import AIRFIELD_AVIATOR_ROLE_KEY, can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.stats import build_stats_embed
