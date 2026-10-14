@@ -3,6 +3,7 @@ import discord
 from discord import ui
 from app.core import settings
 from app.libs.views import BaseModal, FacilityModal
+from app.features.airfield.panel import refresh_controls
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.service import format_depot_thread_title
 from app.features.airfield.views.utils import (
@@ -46,6 +47,7 @@ class CreateDepotModal(FacilityModal, title="Create Airfield Depot"):
 
         AirfieldRepository.add_airfield(name, code, location, str(thread.id) if thread else None)
         await interaction.send(f"Depot **{name}** created. Location: **{location}**.")
+        await refresh_controls(interaction.guild)
 
 
 class AddStockModal(BaseModal, title="Add Aircraft Stock"):
@@ -79,6 +81,7 @@ class AddStockModal(BaseModal, title="Add Aircraft Stock"):
             self.airfield_id,
             f"📦 {interaction.user.mention} has added **{qty}x {plane}** to the stockpile."
         )
+        await refresh_controls(interaction.guild)
 
 
 class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission"):

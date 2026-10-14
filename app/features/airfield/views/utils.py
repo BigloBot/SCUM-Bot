@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import discord
+from app.features.airfield.panel import refresh_controls
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import send_thread_message
 
@@ -110,12 +111,14 @@ async def finish_flight(interaction: discord.Interaction, status: str, destinati
             interaction.guild, destination_id,
             f"🚚 {mention} has transported {plane} in from **{source_name}**."
         )
+        await refresh_controls(interaction.guild)
         return
 
     await interaction.send(f"Flight logged: **{plane_type}** returned to **{source_name}**.")
     await log_to_depot_thread(
         interaction.guild, flight["airfield_id"], f"🛬 {mention} has returned {plane} to the stockpile."
     )
+    await refresh_controls(interaction.guild)
 
 
 async def checkout_and_log(interaction: discord.Interaction, airfield_id: int, plane_type: str, mission: str):
@@ -140,3 +143,4 @@ async def checkout_and_log(interaction: discord.Interaction, airfield_id: int, p
         airfield_id,
         f"🛫 {interaction.user.mention} has taken out {article(plane_type)} **{plane_type}** for **{mission}**."
     )
+    await refresh_controls(interaction.guild)

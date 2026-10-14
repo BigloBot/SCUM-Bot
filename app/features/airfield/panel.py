@@ -6,9 +6,27 @@ from app.features.airfield.repository import AirfieldRepository
 logger = logging.getLogger(__name__)
 
 
+def summarize_stock(rows, planes) -> list[tuple[str, int]]:
+    """
+    Stock per aircraft as (name, count): every configured plane in config order (zero included), then any stored
+    type that isn't configured any more. Stock stored under the older "Name (Role)" label counts toward its plane.
+    """
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["plane_type"]] = counts.get(row["plane_type"], 0) + row["count"]
+
+    summary = []
+    for plane in planes:
+        legacy = [k for k in counts if k.startswith(f"{plane.label} (")]
+        total = counts.pop(plane.label, 0) + sum(counts.pop(k) for k in legacy)
+        summary.append((plane.display_label, total))
+    summary.extend(sorted(counts.items()))
+    return summary
+
+
 def build_panel_embed() -> discord.Embed:
     war = settings.get_active_war()
-    return discord.Embed(
+    embed = discord.Embed(
         title="Airfield Control Panel",
         description=(
             f"Active war: **War {war}**\n\n"
@@ -17,6 +35,21 @@ def build_panel_embed() -> discord.Embed:
         ),
         color=discord.Color.blue()
     )
+
+    depots = AirfieldRepository.get_airfields()
+    if not depots:
+        embed.add_field(name="Aircraft in stock", value="No depots yet. Use **Create Depot** to add one.", inline=False)
+        return embed
+
+    summary = summarize_stock(AirfieldRepository.get_total_stock(), AirfieldRepository.get_aircraft_types())
+    total = sum(count for _, count in summary)
+    lines = "\n".join(f"{name}: **{count}**" for name, count in summary) or "No aircraft configured."
+    embed.add_field(
+        name=f"Aircraft in stock: {total} across {len(depots)} depot{'s' if len(depots) != 1 else ''}",
+        value=lines[:1024],
+        inline=False
+    )
+    return embed
 
 
 async def _delete_old_message(guild: discord.Guild, channel_id: str, message_id: str):
@@ -70,6 +103,15 @@ async def _refresh_controls(guild: discord.Guild, channel: discord.TextChannel =
     AirfieldRepository.set_config("controls_channel_id", str(target.id))
     AirfieldRepository.set_config("controls_message_id", str(message.id))
     return "posted"
+
+
+async def refresh_controls(guild: discord.Guild) -> str:
+    """Re-renders just the controls message (e.g. after stock changed). Never raises; see _refresh_controls."""
+    try:
+        return await _refresh_controls(guild)
+    except Exception:
+        logger.error("Could not refresh the controls message.", exc_info=True)
+        return "failed"
 
 
 async def refresh_control_panel(guild: discord.Guild, channel: discord.TextChannel = None) -> str:

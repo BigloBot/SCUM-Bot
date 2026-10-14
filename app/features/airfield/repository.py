@@ -131,6 +131,22 @@ class AirfieldRepository:
             return cursor.fetchall()
 
     @staticmethod
+    def get_total_stock():
+        """Aircraft in stock across every active depot of the active war: one row per stored plane_type."""
+        war_number = settings.get_active_war()
+        with get_db() as conn:
+            return conn.execute(
+                """
+                SELECT p.plane_type, COUNT(*) AS count
+                FROM plane_instances p
+                JOIN airfields a ON a.id = p.airfield_id
+                WHERE a.war_number = ? AND a.status = 'ACTIVE' AND p.status = 'IN_STOCK'
+                GROUP BY p.plane_type
+                """,
+                (war_number,)
+            ).fetchall()
+
+    @staticmethod
     def get_user_active_flight(user_id: str):
         with get_db() as conn:
             cursor = conn.cursor()

@@ -4,7 +4,7 @@ from app.libs.views import BaseView, FacilitySelect
 from app.features.airfield.repository import AirfieldRepository
 from app.features.airfield.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.utils import MISSION_PRESETS, checkout_and_log, finish_flight
-from app.features.airfield.panel import refresh_kill_board
+from app.features.airfield.panel import refresh_controls, refresh_kill_board
 from app.features.airfield.views.modals import AddStockModal, CustomMissionModal
 
 class MissionSelect(ui.Select):
@@ -115,6 +115,7 @@ class DepotSelect(FacilitySelect):
                     f"🗑️ {interaction.user.mention} has deleted this depot. This thread is now locked."
                 )
                 await update_thread_state(interaction.guild, depot["thread_id"], False, "Depot deleted")
+            await refresh_controls(interaction.guild)
         elif self.action == "flight":
             view = PlaneSelectView(airfield_id)
             await interaction.send("Select the aircraft type you are taking out:", view=view)
