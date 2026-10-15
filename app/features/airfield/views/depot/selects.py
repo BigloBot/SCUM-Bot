@@ -1,11 +1,17 @@
 import discord
 from discord import ui
-from app.libs.views.views import BaseView, FacilitySelect
+from app.libs.views.views import MAX_SELECT_OPTIONS, BaseView, FacilitySelect
 from app.features.airfield.repository import STOCK_SOURCES, AirfieldRepository
 from app.libs.discord.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.depot.flight import MISSION_PRESETS, checkout_and_log, finish_flight
 from app.features.airfield.dashboard import refresh_controls
-from app.features.airfield.views.depot.modals import AddStockModal, CustomMissionModal
+from app.features.airfield.views.depot.modals import (
+    AddStockModal,
+    CustomMissionModal,
+    add_stock,
+    log_stock_added,
+    stock_added_text,
+)
 
 class MissionSelect(ui.Select):
     def __init__(self, airfield_id: int, plane_type: str):
@@ -69,29 +75,45 @@ class CheckoutAircraftSelect(AircraftSelect):
         await interaction.send(f"Select the mission for **{plane_type}**:", view=view)
 
 
-class StockSourceView(BaseView):
-    """Step between picking the aircraft and entering the quantity: where is this stock coming from?"""
-    def __init__(self, airfield_id: int, plane_type: str):
-        super().__init__(timeout=180)
-        self.airfield_id = airfield_id
-        self.plane_type = plane_type
-        for source in STOCK_SOURCES:
-            button = ui.Button(label=source, style=discord.ButtonStyle.primary)
-            button.callback = self._make_callback(source)
-            self.add_item(button)
+STOCK_QUANTITY_CHOICES = range(1, MAX_SELECT_OPTIONS + 1)  # the quantity dropdown holds at most 25 options
 
-    def _make_callback(self, source: str):
-        async def callback(interaction: discord.Interaction):
-            await interaction.response.send_modal(AddStockModal(self.airfield_id, self.plane_type, source))
-        return callback
+
+def _show_choice(select: ui.Select, value: str):
+    """Marks `value` as the selected option so the dropdown keeps showing it after the message is redrawn."""
+    for option in select.options:
+        option.default = option.value == value
 
 
 class StockAircraftSelect(AircraftSelect):
     async def on_pick(self, interaction: discord.Interaction, plane_type: str):
-        await interaction.send(
-            f"Was the **{plane_type}** produced, purchased, or something else?",
-            view=StockSourceView(self.airfield_id, plane_type)
-        )
+        self.view.plane_type = plane_type
+        _show_choice(self, plane_type)
+        await interaction.response.edit_message(view=self.view)
+
+
+class StockSourceSelect(ui.Select):
+    def __init__(self):
+        options = [discord.SelectOption(label=source, value=source) for source in STOCK_SOURCES]
+        super().__init__(placeholder="Where is it from? (Produced / Purchased / Other)", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.source = self.values[0]
+        _show_choice(self, self.values[0])
+        await interaction.response.edit_message(view=self.view)
+
+
+class StockQuantitySelect(ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label=str(n), value=str(n), default=(n == 1))
+            for n in STOCK_QUANTITY_CHOICES
+        ]
+        super().__init__(placeholder="How many?", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.quantity = int(self.values[0])
+        _show_choice(self, self.values[0])
+        await interaction.response.edit_message(view=self.view)
 
 
 class PlaneSelectView(BaseView):
@@ -100,10 +122,54 @@ class PlaneSelectView(BaseView):
         self.add_item(CheckoutAircraftSelect(airfield_id))
 
 
-class StockSelectView(BaseView):
+class StockEntryView(BaseView):
+    """
+    Adding stock in one message: aircraft, source and quantity dropdowns, then a button to confirm.
+    Nothing is saved until Add Stock is pressed; aircraft and source have no default so they can't be skipped.
+    """
+    visible_seconds = 300  # longer than the usual 30s reply: people take a moment to fill in three dropdowns
+
     def __init__(self, airfield_id: int):
-        super().__init__(timeout=180)
+        super().__init__(timeout=self.visible_seconds)
+        self.airfield_id = airfield_id
+        self.plane_type: str | None = None
+        self.source: str | None = None
+        self.quantity = 1
         self.add_item(StockAircraftSelect(airfield_id))
+        self.add_item(StockSourceSelect())
+        self.add_item(StockQuantitySelect())
+
+    def missing_choice(self) -> str | None:
+        if self.plane_type is None:
+            return "Choose an aircraft first."
+        if self.source is None:
+            return "Choose where the stock is from (produced, purchased or other) first."
+        return None
+
+    @ui.button(label="Add Stock", style=discord.ButtonStyle.green, emoji="📦", row=3)
+    async def confirm(self, interaction: discord.Interaction, button: ui.Button):
+        problem = self.missing_choice()
+        if problem:
+            await interaction.send(problem)
+            return
+        if not add_stock(self.airfield_id, self.plane_type, str(interaction.user.id), self.source, self.quantity):
+            await interaction.send("That depot is no longer active in the current war.")
+            return
+
+        self.stop()
+        await interaction.response.edit_message(
+            content=f"Added {stock_added_text(self.plane_type, self.source, self.quantity)} to the stockpile.",
+            view=None
+        )
+        await log_stock_added(interaction, self.airfield_id, self.plane_type, self.source, self.quantity)
+
+    @ui.button(label="Custom Quantity...", style=discord.ButtonStyle.secondary, row=3)
+    async def custom_quantity(self, interaction: discord.Interaction, button: ui.Button):
+        problem = self.missing_choice()
+        if problem:
+            await interaction.send(problem)
+            return
+        await interaction.response.send_modal(AddStockModal(self.airfield_id, self.plane_type, self.source))
 
 
 class DepotSelect(FacilitySelect):
@@ -118,7 +184,11 @@ class DepotSelect(FacilitySelect):
 
     async def on_pick(self, interaction: discord.Interaction, airfield_id: int):
         if self.action == "add_stock":
-            await interaction.send("Select the aircraft to add:", view=StockSelectView(airfield_id))
+            await interaction.send(
+                "Add aircraft stock - choose the aircraft, where it is from and how many, then press Add Stock:",
+                view=StockEntryView(airfield_id),
+                delete_after=StockEntryView.visible_seconds
+            )
         elif self.action == "view_details":
             depot = AirfieldRepository.get_depot_by_id(airfield_id)
             stock = AirfieldRepository.get_stock_summary(airfield_id)

@@ -49,7 +49,30 @@ class CreateDepotModal(FacilityModal, title="Create Airfield Depot"):
         await refresh_controls(interaction.guild)
 
 
+def stock_added_text(plane_type: str, source: str, qty: int) -> str:
+    return f"**{qty}x {plane_type}** ({source.lower()})"
+
+
+def add_stock(airfield_id: int, plane_type: str, user_id: str, source: str, qty: int) -> bool:
+    """Adds `qty` aircraft to a depot's stock. False if the depot is no longer active in the current war."""
+    for _ in range(qty):
+        if not AirfieldRepository.add_plane(airfield_id, plane_type, user_id, source):
+            return False
+    return True
+
+
+async def log_stock_added(interaction: discord.Interaction, airfield_id: int, plane_type: str, source: str, qty: int):
+    """Posts the stock addition in the depot thread and refreshes the control panel. Call after replying."""
+    await log_to_depot_thread(
+        interaction.guild,
+        airfield_id,
+        f"📦 {interaction.user.mention} has added {stock_added_text(plane_type, source, qty)} to the stockpile."
+    )
+    await refresh_controls(interaction.guild)
+
+
 class AddStockModal(BaseModal, title="Add Aircraft Stock"):
+    """Quantity prompt for amounts the form's quantity dropdown doesn't cover (it stops at 25)."""
     quantity = ui.TextInput(label="Quantity", placeholder="1", default="1", required=True, max_length=3)
 
     def __init__(self, airfield_id: int, plane_type: str, source: str = DEFAULT_STOCK_SOURCE):
@@ -67,21 +90,12 @@ class AddStockModal(BaseModal, title="Add Aircraft Stock"):
             await interaction.send("Please enter a valid positive number for the quantity.")
             return
 
-        plane = self.plane_type
-        user_id = str(interaction.user.id)
+        if not add_stock(self.airfield_id, self.plane_type, str(interaction.user.id), self.source, qty):
+            await interaction.send("That depot is no longer active in the current war.")
+            return
 
-        for _ in range(qty):
-            if not AirfieldRepository.add_plane(self.airfield_id, plane, user_id, self.source):
-                await interaction.send("That depot is no longer active in the current war.")
-                return
-
-        await interaction.send(f"Added **{qty}x {plane}** ({self.source.lower()}) to the stockpile.")
-        await log_to_depot_thread(
-            interaction.guild,
-            self.airfield_id,
-            f"📦 {interaction.user.mention} has added **{qty}x {plane}** ({self.source.lower()}) to the stockpile."
-        )
-        await refresh_controls(interaction.guild)
+        await interaction.send(f"Added {stock_added_text(self.plane_type, self.source, qty)} to the stockpile.")
+        await log_stock_added(interaction, self.airfield_id, self.plane_type, self.source, qty)
 
 
 class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission"):
