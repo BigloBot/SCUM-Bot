@@ -71,33 +71,6 @@ async def log_stock_added(interaction: discord.Interaction, airfield_id: int, pl
     await refresh_controls(interaction.guild)
 
 
-class AddStockModal(BaseModal, title="Add Aircraft Stock"):
-    """Quantity prompt for amounts the form's quantity dropdown doesn't cover (it stops at 25)."""
-    quantity = ui.TextInput(label="Quantity", placeholder="1", default="1", required=True, max_length=3)
-
-    def __init__(self, airfield_id: int, plane_type: str, source: str = DEFAULT_STOCK_SOURCE):
-        super().__init__(title=f"Add {plane_type} ({source})"[:45])
-        self.airfield_id = airfield_id
-        self.plane_type = plane_type
-        self.source = source
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            qty = int(self.quantity.value.strip())
-            if qty <= 0:
-                raise ValueError()
-        except ValueError:
-            await interaction.send("Please enter a valid positive number for the quantity.")
-            return
-
-        if not add_stock(self.airfield_id, self.plane_type, str(interaction.user.id), self.source, qty):
-            await interaction.send("That depot is no longer active in the current war.")
-            return
-
-        await interaction.send(f"Added {stock_added_text(self.plane_type, self.source, qty)} to the stockpile.")
-        await log_stock_added(interaction, self.airfield_id, self.plane_type, self.source, qty)
-
-
 class CustomMissionModal(BaseModal, title="Check Out Aircraft - Custom Mission"):
     usecase = ui.TextInput(label="Flight Purpose / Operation Details", placeholder="Describe custom operation...", required=True, style=discord.TextStyle.paragraph)
 

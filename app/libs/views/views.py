@@ -14,7 +14,7 @@ AMOUNT_PATTERN = re.compile(r"[0-9]{1,9}")
 
 INTERNAL_ERROR = "An internal error occurred. Please try again, and let an admin know if it keeps happening."
 
-MAX_SELECT_OPTIONS = 25  # a Discord dropdown holds at most 25 options
+MAX_SELECT_OPTIONS = 5
 
 
 async def respond_or_followup(interaction: discord.Interaction, content: str, *, ephemeral: bool = True, **kwargs):

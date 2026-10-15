@@ -7,7 +7,6 @@ from app.libs.discord.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.depot.flight import MISSION_PRESETS, checkout_and_log, finish_flight
 from app.features.airfield.dashboard import refresh_controls
 from app.features.airfield.views.depot.modals import (
-    AddStockModal,
     CustomMissionModal,
     add_stock,
     log_stock_added,
@@ -102,14 +101,11 @@ def build_stock_form(airfield_id: int) -> FormView:
     async def done(interaction: discord.Interaction, values: dict):
         await log_stock_added(interaction, airfield_id, values["plane_type"], values["source"], values["quantity"])
 
-    async def custom_quantity(interaction: discord.Interaction, values: dict):
-        await interaction.response.send_modal(AddStockModal(airfield_id, values["plane_type"], values["source"]))
-
     return FormView(
         [
             FormField("plane_type", "an aircraft", "Choose an aircraft type...", aircraft_options(airfield_id)),
             FormField("source", "where the stock is from (produced, purchased or other)",
-                      "Where is it from?", simple_options(STOCK_SOURCES)),
+                      "How was it acquired?", simple_options(STOCK_SOURCES)),
             FormField("quantity", "a quantity", "How many?", simple_options(range(1, MAX_SELECT_OPTIONS + 1)),
                       default="1", convert=int),
         ],
@@ -117,7 +113,6 @@ def build_stock_form(airfield_id: int) -> FormView:
         submit_label="Add Stock",
         submit_emoji="📦",
         done=done,
-        actions=[FormAction("Custom Quantity...", custom_quantity)],
         timeout=STOCK_FORM_SECONDS,
     )
 
