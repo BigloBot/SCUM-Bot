@@ -83,33 +83,52 @@ def build_production_embed(war: int, production: dict, planes, active_war: int) 
     Aircraft commissioned into the air fleet in a war, with losses: a summary, a per-aircraft breakdown
     (configured order, legacy labels folded in) and the top producers. Past wars are worded in the past tense.
     """
-    embed = discord.Embed(title=f"Production Stats - War {war}", color=discord.Color.green())
+    source = production.get("source")
+    title = f"Production Stats - War {war}" + (f" ({source})" if source else "")
+    embed = discord.Embed(title=title, color=discord.Color.green())
     total, lost = production["total"], production["lost"]
+    # Losses aren't tracked per source, so a source-filtered report is about commissioned aircraft only.
+    if source:
+        lost = 0
     if not total and not lost:
+        qualifier = f" {source.lower()}" if source else ""
         embed.description = (
-            "No aircraft have been added to the SCUM air fleet yet this war." if war == active_war
-            else f"No aircraft were added to the SCUM air fleet during War {war}."
+            f"No{qualifier} aircraft have been added to the SCUM air fleet yet this war." if war == active_war
+            else f"No{qualifier} aircraft were added to the SCUM air fleet during War {war}."
         )
         return embed
 
+    kind = f"{source.lower()} aircraft" if source else "aircraft"
     if war == active_war:
         have_been = "has been" if total == 1 else "have been"
-        commissioned = f"**{total}** aircraft {have_been} commissioned into the SCUM air fleet this war"
+        commissioned = f"**{total}** {kind} {have_been} commissioned into the SCUM air fleet this war"
         losses = "none have been lost" if not lost else f"**{lost}** {'has' if lost == 1 else 'have'} been lost"
     else:
         was = "was" if total == 1 else "were"
-        commissioned = f"**{total}** aircraft {was} commissioned into the SCUM air fleet during War {war}"
+        commissioned = f"**{total}** {kind} {was} commissioned into the SCUM air fleet during War {war}"
         losses = "none were lost" if not lost else f"**{lost}** {'was' if lost == 1 else 'were'} lost"
+    summary = f"{commissioned}." if source else f"{commissioned}, and {losses}."
     embed.description = (
-        f"{commissioned}, and {losses}.\n"
+        f"{summary}\n"
         "*Aircraft returning from a flight or moved by a transport aren't counted as new.*"
     )
 
     produced = dict(summarize_stock(production["by_type"], planes))
-    lost_by_type = dict(summarize_stock(production["lost_by_type"], planes))
-    names = list(produced) + [n for n in lost_by_type if n not in produced]
-    lines = [f"{name}: **{produced.get(name, 0)}** commissioned · **{lost_by_type.get(name, 0)}** lost" for name in names]
+    if source:
+        lines = [f"{name}: **{count}** commissioned" for name, count in produced.items()]
+        embed.description += "\n*Losses aren't tracked by source, so they aren't shown here.*"
+    else:
+        lost_by_type = dict(summarize_stock(production["lost_by_type"], planes))
+        names = list(produced) + [n for n in lost_by_type if n not in produced]
+        lines = [f"{name}: **{produced.get(name, 0)}** commissioned · **{lost_by_type.get(name, 0)}** lost" for name in names]
     embed.add_field(name="By aircraft", value="\n".join(lines)[:1024], inline=False)
+
+    if not source:
+        embed.add_field(
+            name="By source",
+            value="\n".join(f"{name}: **{count}**" for name, count in production["by_source"]),
+            inline=False
+        )
 
     if production["producers"]:
         lines = []

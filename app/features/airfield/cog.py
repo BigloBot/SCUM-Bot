@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 import discord
 from discord import app_commands
@@ -26,9 +26,16 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
 
     # ==================== STATS ====================
     @airfield.command(name="stats", description="Top aces, busiest pilots and aircraft production for a war.")
-    @app_commands.describe(war="War to show (defaults to the active war).")
+    @app_commands.describe(
+        war="War to show (defaults to the active war).",
+        source="Only count aircraft added to stock from this source (Produced, Purchased or Other)."
+    )
     @commands.guild_only()
-    async def stats(ctx: commands.Context, war: Optional[int] = None):
+    async def stats(
+            ctx: commands.Context,
+            war: Optional[int] = None,
+            source: Optional[Literal["Produced", "Purchased", "Other"]] = None
+    ):
         if not can_use_airfield(ctx.author):
             await ctx.send("You don't have permission to use airfield commands.", ephemeral=True)
             return
@@ -36,8 +43,8 @@ def register(bot: commands.Bot, scum: commands.HybridGroup):
         embeds = [
             build_stats_embed(war, AirfieldRepository.get_pilot_stats(war)),
             build_production_embed(
-                war, AirfieldRepository.get_production_stats(war), AirfieldRepository.get_aircraft_types(),
-                settings.get_active_war()
+                war, AirfieldRepository.get_production_stats(war, source=source),
+                AirfieldRepository.get_aircraft_types(), settings.get_active_war()
             ),
         ]
         # Private reply that deletes itself, like the other airfield replies (two embeds take a while to read).

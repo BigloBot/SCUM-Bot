@@ -1,7 +1,7 @@
 import discord
 from discord import ui
 from app.libs.views.views import BaseView, FacilitySelect
-from app.features.airfield.repository import AirfieldRepository
+from app.features.airfield.repository import STOCK_SOURCES, AirfieldRepository
 from app.libs.discord.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.depot.flight import MISSION_PRESETS, checkout_and_log, finish_flight
 from app.features.airfield.dashboard import refresh_controls
@@ -69,9 +69,29 @@ class CheckoutAircraftSelect(AircraftSelect):
         await interaction.send(f"Select the mission for **{plane_type}**:", view=view)
 
 
+class StockSourceView(BaseView):
+    """Step between picking the aircraft and entering the quantity: where is this stock coming from?"""
+    def __init__(self, airfield_id: int, plane_type: str):
+        super().__init__(timeout=180)
+        self.airfield_id = airfield_id
+        self.plane_type = plane_type
+        for source in STOCK_SOURCES:
+            button = ui.Button(label=source, style=discord.ButtonStyle.primary)
+            button.callback = self._make_callback(source)
+            self.add_item(button)
+
+    def _make_callback(self, source: str):
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.send_modal(AddStockModal(self.airfield_id, self.plane_type, source))
+        return callback
+
+
 class StockAircraftSelect(AircraftSelect):
     async def on_pick(self, interaction: discord.Interaction, plane_type: str):
-        await interaction.response.send_modal(AddStockModal(self.airfield_id, plane_type))
+        await interaction.send(
+            f"Was the **{plane_type}** produced, purchased, or something else?",
+            view=StockSourceView(self.airfield_id, plane_type)
+        )
 
 
 class PlaneSelectView(BaseView):

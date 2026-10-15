@@ -2,6 +2,11 @@ from app.core import settings
 from app.core.config import PlaneType, config
 from app.core.database import get_db
 
+# Where stock came from, chosen when adding it. Stored as-is in plane_instances.source.
+STOCK_SOURCES = ("Produced", "Purchased", "Other")
+DEFAULT_STOCK_SOURCE = "Other"
+
+
 class AirfieldRepository:
     @staticmethod
     def _active_depot_id(conn, airfield_id: int, war_number: int) -> int | None:
@@ -78,7 +83,10 @@ class AirfieldRepository:
             return cursor.fetchone()
 
     @staticmethod
-    def add_plane(airfield_id: int, plane_type: str, user_id: str) -> bool:
+    def add_plane(airfield_id: int, plane_type: str, user_id: str, source: str = DEFAULT_STOCK_SOURCE) -> bool:
+        """Adds one aircraft to a depot's stock. Raises ValueError if `source` isn't one of STOCK_SOURCES."""
+        if source not in STOCK_SOURCES:
+            raise ValueError(f"source must be one of {', '.join(STOCK_SOURCES)}")
         war_number = settings.get_active_war()
         with get_db() as conn:
             airfield_id = AirfieldRepository._active_depot_id(conn, airfield_id, war_number)
@@ -86,10 +94,10 @@ class AirfieldRepository:
                 return False
             conn.execute(
                 """
-                INSERT INTO plane_instances (war_number, airfield_id, plane_type, added_by, status)
-                VALUES (?, ?, ?, ?, 'IN_STOCK')
+                INSERT INTO plane_instances (war_number, airfield_id, plane_type, added_by, status, source)
+                VALUES (?, ?, ?, ?, 'IN_STOCK', ?)
                 """,
-                (war_number, airfield_id, plane_type, user_id)
+                (war_number, airfield_id, plane_type, user_id, source)
             )
             conn.commit()
             return True
@@ -426,31 +434,47 @@ class AirfieldRepository:
     _NOT_PRODUCTION = ("RETURNED", "UNREGISTERED")
 
     @staticmethod
-    def get_production_stats(war_number: int = None, producer_limit: int = 10) -> dict:
+    def get_production_stats(war_number: int = None, producer_limit: int = 10, source: str | None = None) -> dict:
         """
-        Aircraft added to depot stock in a war (whatever happened to them since): totals per stored plane_type
+        Aircraft added to depot stock in a war (whatever happened to them since): totals per stored plane_type,
+        per stock source (Produced / Purchased / Other; rows from before sources were tracked count as Other)
         and the pilots who added the most. Returned aircraft and unregistered checkouts are not production.
         Also the aircraft lost in the war (flights logged as a Loss), per stored plane_type, whoever added them.
+
+        With `source`, the per-type totals, the source breakdown and the producers only count that source.
+        Losses are not split by source: a returned aircraft comes back as a fresh row that has none.
         """
         if war_number is None:
             war_number = settings.get_active_war()
+        if source is not None and source not in STOCK_SOURCES:
+            raise ValueError(f"source must be one of {', '.join(STOCK_SOURCES)}")
         not_production = AirfieldRepository._NOT_PRODUCTION
+        source_sql = "COALESCE(source, ?)"
         with get_db() as conn:
             by_type = conn.execute(
-                """
+                f"""
                 SELECT plane_type, COUNT(*) AS count FROM plane_instances
-                WHERE war_number = ? AND added_by NOT IN (?, ?)
+                WHERE war_number = ? AND added_by NOT IN (?, ?) AND (? IS NULL OR {source_sql} = ?)
                 GROUP BY plane_type
                 """,
-                (war_number, *not_production)
+                (war_number, *not_production, source, DEFAULT_STOCK_SOURCE, source)
+            ).fetchall()
+            by_source_rows = conn.execute(
+                f"""
+                SELECT {source_sql} AS source, COUNT(*) AS count FROM plane_instances
+                WHERE war_number = ? AND added_by NOT IN (?, ?) AND (? IS NULL OR {source_sql} = ?)
+                GROUP BY {source_sql}
+                """,
+                (DEFAULT_STOCK_SOURCE, war_number, *not_production, source,
+                 DEFAULT_STOCK_SOURCE, source, DEFAULT_STOCK_SOURCE)
             ).fetchall()
             producers = conn.execute(
-                """
+                f"""
                 SELECT added_by AS user_id, COUNT(*) AS count FROM plane_instances
-                WHERE war_number = ? AND added_by NOT IN (?, ?)
+                WHERE war_number = ? AND added_by NOT IN (?, ?) AND (? IS NULL OR {source_sql} = ?)
                 GROUP BY added_by ORDER BY count DESC, added_by LIMIT ?
                 """,
-                (war_number, *not_production, producer_limit)
+                (war_number, *not_production, source, DEFAULT_STOCK_SOURCE, source, producer_limit)
             ).fetchall()
             lost_by_type = conn.execute(
                 """
@@ -460,8 +484,11 @@ class AirfieldRepository:
                 """,
                 (war_number,)
             ).fetchall()
+        counts_by_source = {r["source"]: r["count"] for r in by_source_rows}
         return {
             "by_type": by_type,
+            "by_source": [(s, counts_by_source.get(s, 0)) for s in STOCK_SOURCES],
+            "source": source,
             "lost_by_type": lost_by_type,
             "producers": producers,
             "total": sum(r["count"] for r in by_type),

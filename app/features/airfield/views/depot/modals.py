@@ -4,7 +4,7 @@ from discord import ui
 from app.core import settings
 from app.libs.modals import BaseModal, FacilityModal
 from app.features.airfield.dashboard import refresh_controls
-from app.features.airfield.repository import AirfieldRepository
+from app.features.airfield.repository import DEFAULT_STOCK_SOURCE, AirfieldRepository
 from app.features.airfield.service import format_depot_thread_title
 from app.features.airfield.views.depot.flight import (
     checkout_and_log,
@@ -52,10 +52,11 @@ class CreateDepotModal(FacilityModal, title="Create Airfield Depot"):
 class AddStockModal(BaseModal, title="Add Aircraft Stock"):
     quantity = ui.TextInput(label="Quantity", placeholder="1", default="1", required=True, max_length=3)
 
-    def __init__(self, airfield_id: int, plane_type: str):
-        super().__init__(title=f"Add {plane_type}"[:45])
+    def __init__(self, airfield_id: int, plane_type: str, source: str = DEFAULT_STOCK_SOURCE):
+        super().__init__(title=f"Add {plane_type} ({source})"[:45])
         self.airfield_id = airfield_id
         self.plane_type = plane_type
+        self.source = source
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -70,15 +71,15 @@ class AddStockModal(BaseModal, title="Add Aircraft Stock"):
         user_id = str(interaction.user.id)
 
         for _ in range(qty):
-            if not AirfieldRepository.add_plane(self.airfield_id, plane, user_id):
+            if not AirfieldRepository.add_plane(self.airfield_id, plane, user_id, self.source):
                 await interaction.send("That depot is no longer active in the current war.")
                 return
 
-        await interaction.send(f"Added **{qty}x {plane}** to the stockpile.")
+        await interaction.send(f"Added **{qty}x {plane}** ({self.source.lower()}) to the stockpile.")
         await log_to_depot_thread(
             interaction.guild,
             self.airfield_id,
-            f"📦 {interaction.user.mention} has added **{qty}x {plane}** to the stockpile."
+            f"📦 {interaction.user.mention} has added **{qty}x {plane}** ({self.source.lower()}) to the stockpile."
         )
         await refresh_controls(interaction.guild)
 
