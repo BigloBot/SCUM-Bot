@@ -4,7 +4,9 @@ import discord
 from app.core import settings
 from app.features.airfield.repository import AirfieldRepository
 from app.libs.discord.embeds import EmbedField, build_embed, rank_marker
+
 # ==================== KILL BOARD ====================
+
 
 def build_kill_board_embed() -> discord.Embed:
     war = settings.get_active_war()
