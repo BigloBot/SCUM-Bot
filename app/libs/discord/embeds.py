@@ -11,6 +11,15 @@ MAX_FIELD_NAME_LENGTH = 256
 MAX_FIELD_VALUE_LENGTH = 1024
 
 
+# Medals, then keycap numbers: all emoji, so a ranked list lines up (a plain "4." is narrower than a medal).
+_RANK_MARKERS = ["\U0001F947", "\U0001F948", "\U0001F949"] + [f"{n}\ufe0f\u20e3" for n in range(4, 10)] + ["\U0001F51F"]
+
+
+def rank_marker(index: int) -> str:
+    """Marker for a 0-based position in a ranked list: medals for the top 3, keycap numbers up to 10, then "11."."""
+    return _RANK_MARKERS[index] if index < len(_RANK_MARKERS) else f"{index + 1}."
+
+
 @dataclass(frozen=True)
 class EmbedField:
     """A Discord embed field before it is rendered."""
