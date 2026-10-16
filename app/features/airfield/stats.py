@@ -1,9 +1,9 @@
 """Airfield statistics: top aces by kills (with K:D), busiest pilots by sorties (with F/D), and production."""
 import discord
 from app.features.airfield.views.depot.embeds import summarize_stock
+from app.libs.discord.embeds import rank_marker
 
 TOP_N = 10
-MEDALS = ["🥇", "🥈", "🥉"]
 
 
 def ratio(count: int, deaths: int) -> float:
@@ -35,7 +35,7 @@ def _plural(n: int, noun: str) -> str:
 
 
 def _ace_line(index: int, pilot: dict) -> str:
-    rank = MEDALS[index] if index < len(MEDALS) else f"{index + 1}."
+    rank = rank_marker(index)
     return (
         f"{rank} <@{pilot['user_id']}> - **{_plural(pilot['kills'], 'kill')}** · "
         f"K:D **{pilot['kd']:.2f}** ({_plural(pilot['deaths'], 'death')})"
@@ -43,7 +43,7 @@ def _ace_line(index: int, pilot: dict) -> str:
 
 
 def _sorties_line(index: int, pilot: dict) -> str:
-    rank = MEDALS[index] if index < len(MEDALS) else f"{index + 1}."
+    rank = rank_marker(index)
     return (
         f"{rank} <@{pilot['user_id']}> - **{_plural(pilot['flights'], 'sortie')}** · "
         f"F/D **{pilot['fd']:.2f}** ({_plural(pilot['deaths'], 'death')})"
@@ -133,7 +133,7 @@ def build_production_embed(war: int, production: dict, planes, active_war: int) 
     if production["producers"]:
         lines = []
         for i, producer in enumerate(production["producers"]):
-            rank = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
+            rank = rank_marker(i)
             lines.append(f"{rank} <@{producer['user_id']}> - **{producer['count']}** aircraft")
         embed.add_field(name="Top Producers", value="\n".join(lines)[:1024], inline=False)
     return embed
