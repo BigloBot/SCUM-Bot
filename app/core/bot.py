@@ -1,42 +1,52 @@
 import logging
+
 import discord
-from discord.ext import commands
-from app.core.config import config
-from app.core.root import register_root
-from app.features.airfield.cog import register as register_airfield
-from app.features.airfield.views.depot.controls import DepotManagementView
-from app.features.airfield.views.kills.controls import KillBoardView
-from app.features.bank.cog import register as register_bank
-from app.features.bank.views import BankControlView
+from discord import app_commands
+
+from app.core.root import build_root
+from app.libs.discord.responses import Responder
+
+from app.features.airfield.feature import feature as airfield
+from app.features.bank.feature import ffeature as bank
+from app.features.squadlock.feature import feature as squadlock
+from app.features.stats.feature import feature as stats
+from app.features.stockpile.feature import feature as stockpile
 
 logger = logging.getLogger(__name__)
 
-class ScumBot(commands.Bot):
-    def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        owner_ids = set(config.bot.owner_ids) if config.bot.owner_ids else None
-        super().__init__(command_prefix=config.bot.command_prefix, owner_ids=owner_ids, intents=intents)
+# Features to register with the bot.
+FEATURES = (airfield, bank, stockpile, squadlock, stats)
 
-        # Explicit routing registration on boot
-        scum = register_root(self)
-        register_airfield(self, scum)
-        register_bank(self, scum)
+class ScumBot(discord.Client):
+    """Slash commands only, so no privileged intnets are needed."""
+    def __init__(self):
+        super().__init__(intents=discord.Intents.default())
+        self.tree = app_commands.CommandTree(self)
+        self.tree.error(self.on_app_command_error)
+        self.tree.add_command(build_root(FEATURES))
 
     async def setup_hook(self):
         """Re-registers the persistent control panel buttons, then syncs the command tree with Discord."""
-        self.add_view(DepotManagementView())
-        self.add_view(KillBoardView())
-        self.add_view(BankControlView())
+        for feature in FEATURES:
+            for view in feature.persistent_views():
+                self.add_view(view)
         await self.tree.sync()
-        print("[+] Discord command tree synced successfully.")
+        logger.info("Command tree synced.")
 
-    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         """Keeps Discord-facing errors short and generic; details go to the logs."""
-        error = getattr(error, "original", error)
 
-        if isinstance(error, commands.CommandNotFound):
+        command = interaction.command.qualified_name if interaction.command else "unknown"
+
+        if isinstance(error, (app_commands.CheckFailure, app_commands.NoPrivateMesage)):
+            logger.info("%s (%s) was refused /%s.", interaction.user, interaction.user_id, command)
+            await Responder(interaction).send("you don't have permission to use this command.")
             return
+        logger.error("unhandled error in /%s", command, exc_info=getattr(error, "original", error))
+        await Responder(interaction).error()
+
+    async def on_ready(selfself):
+        logger.info("Logged in as %s (%s).", self.user.name, self.user.id)
 
         if isinstance(error, (commands.CheckFailure, commands.NoPrivateMessage)):
             message = "You don't have permission to use this command."

@@ -1,10 +1,13 @@
 """Server-wide permission rules. Feature-specific roles live in each feature's own permissions module."""
+from collections.abc import Callable
+
 import discord
-from discord.ext import commands
+from discord import app_commands
+
 from app.core.config import config
 from app.core.settings import get_setting
 
-# The admin role is deliberately server-wide: it says who runs the bot, not who may use one feature.
+# Global Admin Role
 ADMIN_ROLE_KEY = "admin_role_id"
 
 
@@ -12,8 +15,8 @@ def is_server_owner(member) -> bool:
     return isinstance(member, discord.Member) and member.guild.owner_id == member.id
 
 
-def has_configured_role(member: discord.Member, config_key: str) -> bool:
-    role_id = get_setting(config_key)
+def has_configured_role(member: discord.Member, setting_key: str) -> bool:
+    role_id = get_setting(setting_key)
     return bool(role_id) and any(role.id == int(role_id) for role in member.roles)
 
 
@@ -31,8 +34,15 @@ def is_admin(member) -> bool:
     return has_configured_role(member, ADMIN_ROLE_KEY)
 
 
+def feature_role(role_key: str) -> Callable[[object], bool]:
+    """Access to one feature"""
+    def allowed(member) -> bool:
+        return is_admin(member) or (isinstance(member, discord.Member) and has_configured_role(member, role_key))
+    return allowed
+
+
 def has_admin():
     """Command check: admins only."""
-    async def predicate(ctx: commands.Context):
-        return ctx.guild is not None and is_admin(ctx.author)
-    return commands.check(predicate)
+    async def predicate(interaction: discord.Interaction) -> bool:
+        return interaction.guild is not None and is_admin(interaction.user)
+    return app_commands.check(predicate)

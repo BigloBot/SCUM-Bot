@@ -1,7 +1,7 @@
 """Airfield statistics: top aces by kills (with K:D), busiest pilots by sorties (with F/D), and production."""
 import discord
 from app.features.airfield.views.depot.embeds import summarize_stock
-from app.libs.discord.embeds import rank_marker
+from app.libs.content.embeds import rank_marker
 
 TOP_N = 10
 

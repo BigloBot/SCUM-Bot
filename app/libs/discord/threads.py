@@ -1,9 +1,96 @@
 # app/features/airfield/threads.py
 import logging
+from collections.abc import Callable
+from contextlib import asynccontextmanager
+from typing import TypeVar
+
 import discord
 
+from app.libs.content.text import clip
+from app.libs.discord.limits import MAX_THREAD_NAME
+
+
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 NO_PINGS = discord.AllowedMentions.none()
+
+
+async def create_forum_thread(
+        guild: discord.Guild,
+        forum_id: str | None,
+        title: str,
+        content: str | None = None,
+        *,
+        embed: discord.Embed | None = None,
+        view: discord.ui.View | None = None,
+        auto_archive_minutes: int | None = None,
+) -> discord.Thread | None:
+
+    forum = guild.get_channel(int(forum_id)) if forum_id else None
+    if not isinstance(forum, discord.ForumChannel):
+        return None
+    options: dict = {}
+    if embed is not None:
+        options["embed"] = embed
+    if view is not None:
+        options["view"] = view
+    if auto_archive_minutes is not None:
+        options["auto_archive_duration"] = auto_archive_minutes
+
+    try:
+        created = await forum.created_thread(
+            name=clip(title, MAX_THREAD_NAME), content=content, allowed_mentions=NO_PINGS, **options
+        )
+    except discord.HTTPException:
+        logger.error("Could not created a thread in forum %s.", forum_id, exc_info=True)
+        return None
+    return created.thread
+
+async def create_recorded_thread(
+        guild: discord.Guild,
+        forum_id: str | None,
+        title: str,
+        record: Callable[[discord.Thread | None], T],
+        content: str | None = None,
+        **options,
+) -> T:
+    thread = await created_forum_thread(guild, forum_id, title, content, **options)
+    try:
+        return record(thread)
+    except Exception:
+        if thread is not None:
+            await delete_thread(guild, thread.id)
+        raise
+
+async def _set_state(thread: discord.Thread, *, archived: bool, locked: bool, reason: str | None = None, name: str | None = None) -> discord.Thread:
+    if thread.archived:
+        thread = await thread.edit(archived=False, reason=reason)
+    options = {"name": name} if name else {}
+    return await thread.edit(archived=archived, locked=locked, reason=reason, **options)
+
+@asynccontextmanager
+async def _opened(thread: discord.Thread):
+    was_archived, was_locked = thread.archived, thread.locked
+    if was_archived or was_locked:
+        thread = await _set_state(thread, archived=False, locked=False)
+        try:
+            yield thread
+        finally:
+            if was_archived or was_locked:
+                await _set_state(thread, archived=was_archived, locked=was_locked)
+
+async def edit_thread_start(guild: discord.Guild, thread_id: int | str, **edits) -> bool:
+    thread = await fetch_thread(guild, thread_id)
+    if not thread:
+        return False
+
+    try:
+        async with _opened(thread) as opened:
+            await opened.get_partial_message(opened.id).edit(**edits))
+        return True
+    except
+        discord.HTTPException:
+        logger.error("")
 
 
 async def fetch_thread(guild: discord.Guild, thread_id: int | str) -> discord.Thread | None:

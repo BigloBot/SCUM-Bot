@@ -1,95 +1,37 @@
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field
 import yaml
+
+from app.libs.models import Strict
+from app.libs.world.hexes import Hexes
+from app.libs.world.units import Forces
 
 load_dotenv()
 
-
-# --- Domain Models ---
-
-class PlaneType(BaseModel):
-    """One aircraft: a kill type (colonial_planes) or one of our own (warden_planes)."""
-    model_config = ConfigDict(frozen=True)
-
-    key: str
-    label: str
-    description: str
-
-class AirfieldConfig(BaseModel):
-    colonial_planes: list[PlaneType] = Field(default_factory=list)
-    warden_planes: list[PlaneType] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_unique_keys(self):
-        """Ensure no duplicate plane keys exist in colonial_planes or warden_planes."""
-        colonial_keys = [p.key for p in self.colonial_planes]
-        if len(colonial_keys) != len(set(colonial_keys)):
-            raise ValueError("Duplicate 'key' found in colonial_planes config!")
-        warden_keys = [p.key for p in self.warden_planes]
-        if len(warden_keys) != len(set(warden_keys)):
-            raise ValueError("Duplicate 'key' found in warden_planes config!")
-        return self
-
-    @property
-    def colonial_planes_by_key(self) -> dict[str, PlaneType]:
-        return {p.key: p for p in self.colonial_planes}
-
-    @property
-    def warden_planes_by_key(self) -> dict[str, PlaneType]:
-        return {p.key: p for p in self.warden_planes}
-
-    # --- Kill types: the colonial planes pilots can report shooting down ---
-
-    @property
-    def kill_types(self) -> list[PlaneType]:
-        """The kill types in dropdown order."""
-        return self.colonial_planes
-
-    def kill_type_label(self, key: str) -> str:
-        """Display name for a stored kill type key. A type later removed from the config shows under its key."""
-        plane = self.colonial_planes_by_key.get(key)
-        return plane.label if plane else key
-
-    def kill_type_position(self, key: str) -> int:
-        """Sort position of a stored kill type key; keys no longer in the config sort last."""
-        keys = [p.key for p in self.colonial_planes]
-        return keys.index(key) if key in keys else len(keys)
+class WorldConfig(Forces):
+    """config.yaml's `world` section, shared by every feature as `config.world`"""
+    hexes: Hexes = Fielddefault_factory=lambda: Hexes([]))
 
 
-class FeatureConfig(BaseModel):
-    airfield: AirfieldConfig = Field(default_factory=AirfieldConfig)
-
-
-class BotConfig(BaseModel):
+class BotConfig(Strict):
     token: str = ""
-    command_prefix: str = "!"
     owner_ids: list[int] = Field(default_factory=list)
 
 
-class DatabaseConfig(BaseModel):
+class DatabaseConfig(Strict):
     path: str = "data/bot.db"
-    max_connections: int = 5
 
 
-# --- Root Config ---
-
-class AppConfig(BaseModel):
+class AppConfig(Strict):
     bot: BotConfig = Field(default_factory=BotConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    features: FeatureConfig = Field(default_factory=FeatureConfig)
-
-    @property
-    def colonial_planes_by_key(self) -> dict[str, PlaneType]:
-        return self.features.airfield.colonial_planes_by_key
-
-    @property
-    def warden_planes_by_key(self) -> dict[str, PlaneType]:
-        return self.features.airfield.warden_planes_by_key
+    world: WorldConfig = Field(default_factory=WorldConfig)
 
 
-# --- Loader Function ---
+# --- Config Loader ---
 
 def _find_config_file(file_path: str | Path | None = None) -> Path:
     if file_path is None:
@@ -119,11 +61,6 @@ def load_config(file_path: str | Path | None = None) -> AppConfig:
     if env_token:
         data.setdefault("bot", {})["token"] = env_token
 
-    # Allow environment variables as fallback if not explicitly configured in yaml
-    env_prefix = os.getenv("COMMAND_PREFIX")
-    if env_prefix and "command_prefix" not in data.get("bot", {}):
-        data.setdefault("bot", {})["command_prefix"] = env_prefix
-
     env_db_path = os.getenv("DATABASE_PATH")
     if env_db_path and "path" not in data.get("database", {}):
         data.setdefault("database", {})["path"] = env_db_path
@@ -135,8 +72,7 @@ def reload_config(file_path: str | Path | None = None) -> AppConfig:
     """Reloads config from disk and updates the global instance in place. Raises (leaving it untouched) if invalid."""
     new_config = load_config(file_path)
     config.bot = new_config.bot
-    config.database = new_config.database
-    config.features = new_config.features
+    config.world = new_config.world
     return config
 
 

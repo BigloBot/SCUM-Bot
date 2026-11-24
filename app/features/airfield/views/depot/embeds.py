@@ -1,7 +1,7 @@
 import discord
 from app.core import settings
 from app.features.airfield.repository import AirfieldRepository
-from app.libs.discord.embeds import EmbedField, build_embed
+from app.libs.content.embeds import EmbedField, build_embed
 
 
 def summarize_stock(rows, planes) -> list[tuple[str, int]]:

@@ -3,7 +3,7 @@ import discord
 
 from app.core import settings
 from app.features.airfield.repository import AirfieldRepository
-from app.libs.discord.embeds import EmbedField, build_embed, rank_marker
+from app.libs.content.embeds import EmbedField, build_embed, rank_marker
 
 # ==================== KILL BOARD ====================
 
