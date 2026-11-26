@@ -1,7 +1,10 @@
 import discord
 from discord import ui
+from app.libs.discord.responses import Responder
 from app.libs.views.forms import FormAction, FormError, FormField, FormView, simple_options
-from app.libs.views.views import MAX_SELECT_OPTIONS, BaseView, FacilitySelect
+from app.libs.content.text import clip
+from app.libs.discord.limits import MAX_OPTION_DESCRIPTION, MAX_OPTION_LABEL, MAX_SELECT_OPTIONS
+from app.libs.views.views import BaseView, FacilitySelect
 from app.features.airfield.repository import STOCK_SOURCES, AirfieldRepository
 from app.libs.discord.threads import update_thread_state, send_thread_message
 from app.features.airfield.views.depot.flight import MISSION_PRESETS, checkout_and_log, finish_flight
@@ -13,6 +16,7 @@ from app.features.airfield.views.depot.modals import (
     stock_added_text,
 )
 
+MAX_STOCK_QUANTITY = 5  # the most aircraft one Add Stock submission can add
 STOCK_FORM_SECONDS = 300  # longer than the usual 30s reply: people take a moment to fill in three dropdowns
 
 
@@ -53,7 +57,7 @@ def aircraft_options(airfield_id: int) -> list[discord.SelectOption]:
         options.append(discord.SelectOption(
             label=aircraft.label,
             value=aircraft.label,
-            description=f"{aircraft.description} · {stock_text}"[:100],
+            description=clip(f"{aircraft.description} · {stock_text}", MAX_OPTION_DESCRIPTION),
         ))
     return options
 
@@ -70,7 +74,7 @@ class AircraftSelect(ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if self.values[0] == "NONE":
-            await interaction.send("No aircraft types are configured.")
+            await Responder(interaction).send("No aircraft types are configured.")
             return
         await self.on_pick(interaction, self.values[0])
 
@@ -81,7 +85,7 @@ class AircraftSelect(ui.Select):
 class CheckoutAircraftSelect(AircraftSelect):
     async def on_pick(self, interaction: discord.Interaction, plane_type: str):
         view = MissionSelectView(self.airfield_id, plane_type)
-        await interaction.send(f"Select the mission for **{plane_type}**:", view=view)
+        await Responder(interaction).send(f"Select the mission for **{plane_type}**:", view=view)
 
 
 class PlaneSelectView(BaseView):
@@ -106,7 +110,7 @@ def build_stock_form(airfield_id: int) -> FormView:
             FormField("plane_type", "an aircraft", "Choose an aircraft type...", aircraft_options(airfield_id)),
             FormField("source", "where the stock is from (produced, purchased or other)",
                       "How was it acquired?", simple_options(STOCK_SOURCES)),
-            FormField("quantity", "a quantity", "How many?", simple_options(range(1, MAX_SELECT_OPTIONS + 1)),
+            FormField("quantity", "a quantity", "How many?", simple_options(range(1, MAX_STOCK_QUANTITY + 1)),
                       default="1", convert=int),
         ],
         submit=submit,
@@ -130,9 +134,9 @@ class DepotSelect(FacilitySelect):
     async def on_pick(self, interaction: discord.Interaction, airfield_id: int):
         if self.action == "add_stock":
             if not AirfieldRepository.get_aircraft_types():
-                await interaction.send("No aircraft types are configured.")
+                await Responder(interaction).send("No aircraft types are configured.")
                 return
-            await interaction.send(
+            await Responder(interaction).send(
                 "Add aircraft stock - choose the aircraft, where it is from and how many, then press Add Stock:",
                 view=build_stock_form(airfield_id),
                 delete_after=STOCK_FORM_SECONDS
@@ -141,7 +145,7 @@ class DepotSelect(FacilitySelect):
             depot = AirfieldRepository.get_depot_by_id(airfield_id)
             stock = AirfieldRepository.get_stock_summary(airfield_id)
             stock_str = "\n".join([f"• **{s['plane_type']}**: {s['count']}" for s in stock]) or "No planes registered in stock."
-            await interaction.send(
+            await Responder(interaction).send(
                 f"**{depot['name']}**\n"
                 f"Location: **{depot['location']}**\n\n"
                 f"**Stock Inventory:**\n{stock_str}"
@@ -149,7 +153,7 @@ class DepotSelect(FacilitySelect):
         elif self.action == "delete":
             depot = AirfieldRepository.get_depot_by_id(airfield_id)
             AirfieldRepository.delete_airfield(airfield_id)
-            await interaction.send("Depot deleted. Its thread has been locked and archived.")
+            await Responder(interaction).send("Depot deleted. Its thread has been locked and archived.")
             if depot and depot["thread_id"]:
                 await send_thread_message(
                     interaction.guild, depot["thread_id"],
@@ -159,7 +163,7 @@ class DepotSelect(FacilitySelect):
             await refresh_controls(interaction.guild)
         elif self.action == "flight":
             view = PlaneSelectView(airfield_id)
-            await interaction.send("Select the aircraft type you are taking out:", view=view)
+            await Responder(interaction).send("Select the aircraft type you are taking out:", view=view)
 
 
 class DestinationSelect(ui.Select):
@@ -168,10 +172,13 @@ class DestinationSelect(ui.Select):
         depots = AirfieldRepository.get_airfields()
         options = [
             discord.SelectOption(
-                label=d["name"][:100], value=str(d["id"]),
-                description=("Departed from here - " if d["id"] == source_airfield_id else "") + f"Location: {d['location']}"[:80]
+                label=clip(d["name"], MAX_OPTION_LABEL), value=str(d["id"]),
+                description=clip(
+                    ("Departed from here - " if d["id"] == source_airfield_id else "") + f"Location: {d['location']}",
+                    MAX_OPTION_DESCRIPTION,
+                ),
             )
-            for d in depots[:25]
+            for d in depots[:MAX_SELECT_OPTIONS]
         ]
         if not options:
             options = [discord.SelectOption(label="No depots available", value="NONE")]
@@ -179,7 +186,7 @@ class DestinationSelect(ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if self.values[0] == "NONE":
-            await interaction.send("There are no depots available.")
+            await Responder(interaction).send("There are no depots available.")
             return
         await finish_flight(interaction, "Returned", int(self.values[0]))
 

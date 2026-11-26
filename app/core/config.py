@@ -13,7 +13,7 @@ load_dotenv()
 
 class WorldConfig(Forces):
     """config.yaml's `world` section, shared by every feature as `config.world`"""
-    hexes: Hexes = Fielddefault_factory=lambda: Hexes([]))
+    hexes: Hexes = Field(default_factory=lambda: Hexes([]))
 
 
 class BotConfig(Strict):

@@ -12,6 +12,7 @@ from app.core.permissions import ADMIN_ROLE_KEY, has_admin, is_server_owner
 from app.libs.discord.format import PANEL_RESULT_LABELS, role_or
 from app.libs.discord.responses import Responder
 from app.libs.feature import Feature
+from app.libs.world.faction import Faction
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def build_root(features: Sequence[Feature]) -> app_commands.Group:
                 "**Server settings**\n"
                 f"Active war: **War {settings.get_active_war()}**\n"
                 f"Faction: **{settings.get_faction()}**\n"
-                f"Admin role: {role_or(settings.get_setting(ADMIN_ROLE_KEY), "not set (Discord Admin Only)")}"
+                f"Admin role: {role_or(settings.get_setting(ADMIN_ROLE_KEY), 'not set (Discord admins only)')}"
             )
             return
 
@@ -59,11 +60,9 @@ def build_root(features: Sequence[Feature]) -> app_commands.Group:
                 await reply.send("The admin role can't be @everyone.")
                 return
         if war is not None and war < 1:
-            await reply.send("The war number must be 1 or higher.", ephemeral=True)
+            await reply.send("The war number must be 1 or higher.")
             return
-
-
-        await interaction.response.defer(ephermeral=True, think=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         lines = []
         if admin_role is not None:
@@ -90,26 +89,26 @@ def build_root(features: Sequence[Feature]) -> app_commands.Group:
 
         await reply.send("\n".join(lines))
 
-
-    @scum.command(name="refresh", description="Force the control panel messages to resync (admins only).")
+    @scum.command(name="refresh", description="Reload the config and resync the control panel messages (admins only).")
     @has_admin()
-    async def refresh(interaction: discord.Interacction):
-        await interaction.response.defer(ephermeral=True, thinking=True)
+    async def refresh(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         config_line = "Config: reloaded"
         try:
             reload_config()
-        except Exception as _:
-            logger.error("Could not reload config", exc_info=True)
-            config_line = f"Config: reload failed"
+        except Exception as error:
+            logger.error("Could not reload config.yaml.", exc_info=True)
+            reason = (str(error).splitlines() or [type(error).__name__])[0][:200]
+            config_line = f"Config: **not reloaded**, still using the previous one ({reason})"
 
         lines = ["**Resync**"]
         for feature in features:
             if feature.resync is not None:
                 lines.append(f"{feature.name}: {PANEL_RESULT_LABELS[await feature.resync(interaction.guild)]}")
-            lines.append(config_line)
-            await Responder(interaction).send("\n".join(lines))
+        lines.append(config_line)
+        await Responder(interaction).send("\n".join(lines))
 
-        for feature in features:
-            feature.register(scum)
-        return scum
+    for feature in features:
+        feature.register(scum)
+    return scum

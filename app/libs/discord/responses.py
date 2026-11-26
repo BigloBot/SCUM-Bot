@@ -17,12 +17,13 @@ async def _delete_later(message: discord.Message, delay: float) -> None:
     try:
         await message.delete()
     except discord.NotFound:
-        pass
+        return
     except Exception:
         logger.warning("Could not auto-delete a reply.", exc_info=True)
 
+
 class Responder:
-    """Replies to one interactiom, hiding the response-vs-followup state."""
+    """Replies to one interaction, hiding the response-vs-followup state."""
 
     def __init__(self, interaction: discord.Interaction):
         self.interaction = interaction
@@ -44,12 +45,12 @@ class Responder:
         try:
             if interaction.response.is_done():
                 message = await interaction.followup.send(
-                    content, ephermeral=ephemeral, wait=bool(delete_after), **kwargs
+                    content, ephemeral=ephemeral, wait=bool(delete_after), **kwargs
                 )
             else:
                 await interaction.response.send_message(content, ephemeral=ephemeral, **kwargs)
                 message = await interaction.original_response() if delete_after else None
-        except: discord.HTTPException:
+        except discord.HTTPException:
             logger.error("Could not send an interaction response.", exc_info=True)
             return None
 

@@ -1,18 +1,17 @@
-# app/features/airfield/service.py
+"""Airfield business rules: depot thread naming, logging and war-driven thread state."""
 import asyncio
-import discord
-from app.features.airfield.repository import AirfieldRepository
-from app.libs.discord.threads import send_thread_message, update_thread_state
 
-MAX_THREAD_NAME = 100
+import discord
+
+from app.features.airfield.repository import AirfieldRepository
+from app.libs.content.text import clip
+from app.libs.discord.limits import MAX_THREAD_NAME
+from app.libs.discord.threads import send_thread_message, update_thread_state
 
 
 def format_depot_thread_title(war_number: int, name: str, location: str) -> str:
     """Domain rule for thread naming conventions."""
-    title = f"War-{war_number} - {name} - {location}"
-    if len(title) > MAX_THREAD_NAME:
-        title = title[: MAX_THREAD_NAME - 1].rstrip() + "…"
-    return title
+    return clip(f"War-{war_number} - {name} - {location}", MAX_THREAD_NAME)
 
 
 async def log_depot_event(guild: discord.Guild, airfield_id: int, message: str) -> bool:

@@ -2,6 +2,9 @@
 import discord
 from discord import ui
 
+from app.libs.content.text import clip
+from app.libs.discord.limits import MAX_OPTION_DESCRIPTION, MAX_OPTION_LABEL, MAX_SELECT_OPTIONS
+from app.libs.discord.responses import Responder
 from app.features.airfield.dashboard import refresh_kill_board
 from app.features.airfield.repository import AirfieldRepository
 from app.libs.views.views import BaseView
@@ -11,11 +14,11 @@ MAX_KILLS_PER_REPORT = 5  # a Discord dropdown holds at most 25 options
 async def open_kill_type_selection(interaction: discord.Interaction, flight_id: int | None):
     kill_types = AirfieldRepository.get_kill_types()
     if not kill_types:
-        await interaction.send("No kill types are configured.")
+        await Responder(interaction).send("No kill types are configured.")
         return
     view = BaseView(timeout=180)
     view.add_item(KillTypeSelect(kill_types, flight_id))
-    await interaction.send("Which aircraft did you shoot down?", view=view)
+    await Responder(interaction).send("Which aircraft did you shoot down?", view=view)
 
 
 class KillReportFlightChoiceView(BaseView):
@@ -41,8 +44,10 @@ class KillTypeSelect(ui.Select):
         self.kill_types = {t.key: t for t in kill_types}
         self.flight_id = flight_id
         options = [
-            discord.SelectOption(label=t.label[:100], value=t.key, description=t.description[:100])
-            for t in list(kill_types)[:25]
+            discord.SelectOption(
+                label=clip(t.label, MAX_OPTION_LABEL), value=t.key, description=clip(t.description, MAX_OPTION_DESCRIPTION)
+            )
+            for t in list(kill_types)[:MAX_SELECT_OPTIONS]
         ]
         super().__init__(placeholder="Choose the aircraft you shot down...", min_values=1, max_values=1, options=options)
 
@@ -50,7 +55,7 @@ class KillTypeSelect(ui.Select):
         kill_type = self.kill_types[self.values[0]]
         view = BaseView(timeout=180)
         view.add_item(KillCountSelect(kill_type, self.flight_id))
-        await interaction.send(f"How many **{kill_type.label}** were shot down?", view=view)
+        await Responder(interaction).send(f"How many **{kill_type.label}** were shot down?", view=view)
 
 
 class KillCountSelect(ui.Select):
@@ -69,12 +74,12 @@ class KillCountSelect(ui.Select):
                 str(interaction.user.id), {self.kill_type.key: count}, self.flight_id
             )
         except ValueError:
-            await interaction.send("That flight is no longer available. Start a new kill report to choose again.")
+            await Responder(interaction).send("That flight is no longer available. Start a new kill report to choose again.")
             return
         if report_id is None:
-            await interaction.send("Nothing was recorded.")
+            await Responder(interaction).send("Nothing was recorded.")
             return
-        await interaction.send(
+        await Responder(interaction).send(
             f"Recorded **{count}x {self.kill_type.label}**.",
             view=ReportAnotherView(), delete_after=60,
         )
@@ -100,7 +105,7 @@ async def open_kill_report(interaction: discord.Interaction):
 
     previous_flight = AirfieldRepository.get_user_latest_completed_flight(user_id)
     if previous_flight:
-        await interaction.send(
+        await Responder(interaction).send(
             f"No active flight. Report kills against your previous **{previous_flight['plane_type']}** "
             f"flight ({previous_flight['status']}), or record a custom kill?",
             view=KillReportFlightChoiceView(previous_flight),

@@ -14,7 +14,7 @@ MAX_INPUT_PLACEHOLDER = 100
 
 MAX_THREAD_NAME = 100
 
-def fit_option(option: discord.SelectOption, *, default: bool | None = None) -> discord.SelectiOption:
+def fit_option(option: discord.SelectOption, *, default: bool | None = None) -> discord.SelectOption:
     return discord.SelectOption(
         label=clip(option.label, MAX_OPTION_LABEL),
         value=option.value,

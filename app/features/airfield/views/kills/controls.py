@@ -2,6 +2,7 @@
 import discord
 from discord import ui
 
+from app.libs.discord.responses import Responder
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.views.kills.admin import open_kill_fix
 from app.features.airfield.views.kills.reporting import open_kill_report
@@ -17,7 +18,7 @@ class KillBoardView(BaseView):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if can_use_airfield(interaction.user):
             return True
-        await interaction.send("You don't have permission to use these controls.")
+        await Responder(interaction).send("You don't have permission to use these controls.")
         return False
 
     @ui.button(label="Report Kills", style=discord.ButtonStyle.secondary, custom_id="scum:report_kills")

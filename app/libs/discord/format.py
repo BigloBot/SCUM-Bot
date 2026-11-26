@@ -6,7 +6,7 @@ PANEL_RESULT_LABELS: dict[PanelResult, str] = {
     "updated": "refreshed",
     "posted": "reposted",
     "no_channel": "not set up",
-    "failed": "failed (chck permissions)"
+    "failed": "failed (check permissions)"
 }
 
 def channel_or(channel_id: str | None, fallback: str = "not set") -> str:

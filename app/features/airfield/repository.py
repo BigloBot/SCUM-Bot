@@ -1,6 +1,7 @@
 from app.core import settings
-from app.core.config import PlaneType, config
-from app.core.database import get_db
+from app.core.config import config
+from app.libs.world.units import UnitType
+from app.core.database import db
 
 # Where stock came from, chosen when adding it. Stored as-is in plane_instances.source.
 STOCK_SOURCES = ("Produced", "Purchased", "Other")
@@ -11,76 +12,71 @@ class AirfieldRepository:
     @staticmethod
     def _active_depot_id(conn, airfield_id: int, war_number: int) -> int | None:
         """Confirms the depot is ACTIVE in the given war; the passcode is not unique, so depots are addressed by id."""
-        row = conn.execute(
+        row = conn.exec_driver_sql(
             "SELECT id FROM airfields WHERE id = ? AND war_number = ? AND status = 'ACTIVE'",
             (airfield_id, war_number)
-        ).fetchone()
+        ).mappings().fetchone()
         return row["id"] if row else None
 
     @staticmethod
     def add_airfield(name: str, code: str, location: str, thread_id: str = None):
         war_number = settings.get_active_war()
-        with get_db() as conn:
-            conn.execute(
+        with db.begin() as conn:
+            conn.exec_driver_sql(
                 """
                 INSERT INTO airfields (code, name, location, thread_id, war_number, status)
                 VALUES (?, ?, ?, ?, ?, 'ACTIVE')
                 """,
                 (code.upper(), name.upper(), location, thread_id, war_number)
             )
-            conn.commit()
 
     @staticmethod
     def check_duplicate(name: str) -> bool:
         """True if an ACTIVE depot in the current war already has this name. The passcode is not unique."""
         war_number = settings.get_active_war()
-        with get_db() as conn:
-            row = conn.execute(
+        with db.connect() as conn:
+            row = conn.exec_driver_sql(
                 "SELECT 1 FROM airfields WHERE name = ? AND war_number = ? AND status = 'ACTIVE'",
                 (name.upper(), war_number)
-            ).fetchone()
+            ).mappings().fetchone()
         return row is not None
 
     @staticmethod
     def delete_airfield(airfield_id: int):
         """Soft delete only: the row and all of its plane history are kept for reporting."""
-        with get_db() as conn:
-            conn.execute("UPDATE airfields SET status = 'DELETED' WHERE id = ? AND status = 'ACTIVE'", (airfield_id,))
-            conn.commit()
+        with db.begin() as conn:
+            conn.exec_driver_sql("UPDATE airfields SET status = 'DELETED' WHERE id = ? AND status = 'ACTIVE'", (airfield_id,))
 
     @staticmethod
     def get_airfields(war_number: int = None, status: str = 'ACTIVE'):
         if war_number is None:
             war_number = settings.get_active_war()
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        with db.connect() as conn:
+            cursor = conn.exec_driver_sql(
                 "SELECT id, code, name, location, thread_id, war_number, status FROM airfields WHERE war_number = ? AND status = ? ORDER BY name ASC",
                 (war_number, status)
             )
-            return cursor.fetchall()
+            return cursor.mappings().fetchall()
 
     @staticmethod
     def get_all_war_airfields():
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, code, name, location, thread_id, war_number, status FROM airfields")
-            return cursor.fetchall()
+        with db.connect() as conn:
+            cursor = conn.exec_driver_sql("SELECT id, code, name, location, thread_id, war_number, status FROM airfields")
+            return cursor.mappings().fetchall()
 
     @staticmethod
-    def get_aircraft_types() -> list[PlaneType]:
-        """Our own aircraft, in display order (see warden_planes in config.yaml). `label` is what planes store."""
-        return config.features.airfield.warden_planes
+    def get_aircraft_types() -> list[UnitType]:
+        """Our own faction's aircraft, in display order (world.factions in config.yaml). `label` is what planes store."""
+        return config.world.planes(settings.get_faction())
 
     @staticmethod
     def get_depot_by_id(airfield_id: int):
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        with db.connect() as conn:
+            cursor = conn.exec_driver_sql(
                 "SELECT id, code, name, location, thread_id, war_number, status FROM airfields WHERE id = ?",
                 (airfield_id,)
             )
-            return cursor.fetchone()
+            return cursor.mappings().fetchone()
 
     @staticmethod
     def add_plane(airfield_id: int, plane_type: str, user_id: str, source: str = DEFAULT_STOCK_SOURCE) -> bool:
@@ -88,26 +84,24 @@ class AirfieldRepository:
         if source not in STOCK_SOURCES:
             raise ValueError(f"source must be one of {', '.join(STOCK_SOURCES)}")
         war_number = settings.get_active_war()
-        with get_db() as conn:
+        with db.begin() as conn:
             airfield_id = AirfieldRepository._active_depot_id(conn, airfield_id, war_number)
             if airfield_id is None:
                 return False
-            conn.execute(
+            conn.exec_driver_sql(
                 """
                 INSERT INTO plane_instances (war_number, airfield_id, plane_type, added_by, status, source)
                 VALUES (?, ?, ?, ?, 'IN_STOCK', ?)
                 """,
                 (war_number, airfield_id, plane_type, user_id, source)
             )
-            conn.commit()
             return True
 
     @staticmethod
     def get_available_planes(airfield_id: int):
         war_number = settings.get_active_war()
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        with db.connect() as conn:
+            cursor = conn.exec_driver_sql(
                 """
                 SELECT p.plane_type, COUNT(*) as count
                 FROM plane_instances p
@@ -118,14 +112,13 @@ class AirfieldRepository:
                 """,
                 (war_number, airfield_id)
             )
-            return cursor.fetchall()
+            return cursor.mappings().fetchall()
 
     @staticmethod
     def get_stock_summary(airfield_id: int):
         war_number = settings.get_active_war()
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        with db.connect() as conn:
+            cursor = conn.exec_driver_sql(
                 """
                 SELECT p.plane_type, COUNT(*) as count
                 FROM plane_instances p
@@ -135,14 +128,14 @@ class AirfieldRepository:
                 """,
                 (war_number, airfield_id)
             )
-            return cursor.fetchall()
+            return cursor.mappings().fetchall()
 
     @staticmethod
     def get_total_stock():
         """Aircraft in stock across every active depot of the active war: one row per stored plane_type."""
         war_number = settings.get_active_war()
-        with get_db() as conn:
-            return conn.execute(
+        with db.connect() as conn:
+            return conn.exec_driver_sql(
                 """
                 SELECT p.plane_type, COUNT(*) AS count
                 FROM plane_instances p
@@ -151,13 +144,12 @@ class AirfieldRepository:
                 GROUP BY p.plane_type
                 """,
                 (war_number,)
-            ).fetchall()
+            ).mappings().fetchall()
 
     @staticmethod
     def get_user_active_flight(user_id: str):
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
+        with db.connect() as conn:
+            cursor = conn.exec_driver_sql(
                 """
                 SELECT p.id, p.war_number, p.airfield_id, a.code AS airfield_code, p.plane_type, p.usecase
                 FROM plane_instances p
@@ -167,7 +159,7 @@ class AirfieldRepository:
                 """,
                 (str(user_id),)
             )
-            return cursor.fetchone()
+            return cursor.mappings().fetchone()
 
     @staticmethod
     def checkout_plane(airfield_id: int, plane_type: str, usecase: str, user_id: str) -> bool:
@@ -175,13 +167,11 @@ class AirfieldRepository:
             return False
 
         war_number = settings.get_active_war()
-        with get_db() as conn:
+        with db.begin() as conn:
             airfield_id = AirfieldRepository._active_depot_id(conn, airfield_id, war_number)
             if airfield_id is None:
                 return False
-
-            cursor = conn.cursor()
-            cursor.execute(
+            cursor = conn.exec_driver_sql(
                 """
                 SELECT id FROM plane_instances
                 WHERE airfield_id = ? AND (plane_type = ? OR plane_type LIKE ? || ' (%') AND status = 'IN_STOCK'
@@ -189,10 +179,10 @@ class AirfieldRepository:
                 """,
                 (airfield_id, plane_type, plane_type)
             )
-            row = cursor.fetchone()
+            row = cursor.mappings().fetchone()
             if row:
                 plane_id = row["id"]
-                cursor.execute(
+                conn.exec_driver_sql(
                     """
                     UPDATE plane_instances
                     SET status = 'CHECKED_OUT', usecase = ?, removed_by = ?
@@ -201,14 +191,13 @@ class AirfieldRepository:
                     (usecase, str(user_id), plane_id)
                 )
             else:
-                cursor.execute(
+                conn.exec_driver_sql(
                     """
                     INSERT INTO plane_instances (war_number, airfield_id, plane_type, added_by, status, usecase, removed_by)
                     VALUES (?, ?, ?, 'UNREGISTERED', 'CHECKED_OUT', ?, ?)
                     """,
                     (war_number, airfield_id, plane_type, usecase, str(user_id))
                 )
-            conn.commit()
             return True
 
     @staticmethod
@@ -224,10 +213,10 @@ class AirfieldRepository:
 
         war_number = settings.get_active_war()
         destination = destination_airfield_id if destination_airfield_id is not None else flight["airfield_id"]
-        with get_db() as conn:
+        with db.begin() as conn:
             if status == "Returned" and AirfieldRepository._active_depot_id(conn, destination, war_number) is None:
                 raise ValueError("destination depot is not active")
-            conn.execute(
+            conn.exec_driver_sql(
                 """
                 UPDATE plane_instances
                 SET status = ?, completed_at = CURRENT_TIMESTAMP, destination_airfield_id = ?
@@ -236,27 +225,26 @@ class AirfieldRepository:
                 (status, destination if status == "Returned" else None, flight["id"])
             )
             if status == "Returned":
-                conn.execute(
+                conn.exec_driver_sql(
                     """
                     INSERT INTO plane_instances (war_number, airfield_id, plane_type, added_by, status)
                     VALUES (?, ?, ?, 'RETURNED', 'IN_STOCK')
                     """,
                     (war_number, destination, flight["plane_type"])
                 )
-            conn.commit()
         return flight
 
     @staticmethod
-    def get_kill_types() -> list[PlaneType]:
-        """The configured kill types, in display order (colonial_planes in config.yaml)."""
-        return list(config.features.airfield.kill_types)
+    def get_kill_types() -> list[UnitType]:
+        """The kill types: the enemy faction's aircraft, in display order (world.factions in config.yaml)."""
+        return config.world.enemy_planes(settings.get_faction())
 
     @staticmethod
     def get_user_active_flight_in_war(user_id: str, war_number: int = None):
         """Return the pilot's active flight for one war, if any."""
         war_number = war_number if war_number is not None else settings.get_active_war()
-        with get_db() as conn:
-            return conn.execute(
+        with db.connect() as conn:
+            return conn.exec_driver_sql(
                 """
                 SELECT id, plane_type, status, usecase
                 FROM plane_instances
@@ -264,14 +252,14 @@ class AirfieldRepository:
                 ORDER BY id DESC LIMIT 1
                 """,
                 (war_number, str(user_id)),
-            ).fetchone()
+            ).mappings().fetchone()
 
     @staticmethod
     def get_user_latest_completed_flight(user_id: str, war_number: int = None):
         """Return the pilot's most recently completed flight for one war, if any."""
         war_number = war_number if war_number is not None else settings.get_active_war()
-        with get_db() as conn:
-            return conn.execute(
+        with db.connect() as conn:
+            return conn.exec_driver_sql(
                 """
                 SELECT id, plane_type, status, usecase, completed_at
                 FROM plane_instances
@@ -279,34 +267,34 @@ class AirfieldRepository:
                 ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 1
                 """,
                 (war_number, str(user_id)),
-            ).fetchone()
+            ).mappings().fetchone()
 
     @staticmethod
     def add_kill_report(user_id: str, counts: dict[str, int], flight_id: int | None = None) -> int | None:
         """Record valid kills, optionally binding them to a flight owned by this pilot in the active war."""
-        counts = {key: int(n) for key, n in counts.items() if key in config.colonial_planes_by_key and int(n) > 0}
+        valid = {t.key for t in AirfieldRepository.get_kill_types()}
+        counts = {key: int(n) for key, n in counts.items() if key in valid and int(n) > 0}
         if not counts:
             return None
 
         war_number = settings.get_active_war()
-        with get_db() as conn:
+        with db.begin() as conn:
             if flight_id is not None:
-                flight = conn.execute(
+                flight = conn.exec_driver_sql(
                     "SELECT id FROM plane_instances WHERE id = ? AND war_number = ? AND removed_by = ?",
                     (flight_id, war_number, str(user_id)),
-                ).fetchone()
+                ).mappings().fetchone()
                 if flight is None:
                     raise ValueError("flight is no longer available for this report")
-            cursor = conn.execute(
+            cursor = conn.exec_driver_sql(
                 "INSERT INTO kill_reports (war_number, user_id, flight_id) VALUES (?, ?, ?)",
                 (war_number, str(user_id), flight_id),
             )
             report_id = cursor.lastrowid
-            conn.executemany(
+            conn.exec_driver_sql(
                 "INSERT INTO kill_report_items (report_id, kill_type, count) VALUES (?, ?, ?)",
                 [(report_id, key, n) for key, n in counts.items()]
             )
-            conn.commit()
         return report_id
 
     @staticmethod
@@ -314,8 +302,8 @@ class AirfieldRepository:
         """A pilot's kill report entries for a war (one row per report and kill type), newest first."""
         if war_number is None:
             war_number = settings.get_active_war()
-        with get_db() as conn:
-            return conn.execute(
+        with db.connect() as conn:
+            return conn.exec_driver_sql(
                 """
                 SELECT r.id AS report_id, i.kill_type, i.count, r.created_at
                 FROM kill_reports r JOIN kill_report_items i ON i.report_id = r.id
@@ -324,35 +312,33 @@ class AirfieldRepository:
                 LIMIT ?
                 """,
                 (war_number, str(user_id), limit)
-            ).fetchall()
+            ).mappings().fetchall()
 
     @staticmethod
     def set_kill_entry_count(report_id: int, kill_type: str, count: int) -> bool:
         """Corrects how many of a kill type a report holds. False if that entry no longer exists."""
         if count < 1:
             raise ValueError("count must be at least 1")
-        with get_db() as conn:
-            cursor = conn.execute(
+        with db.begin() as conn:
+            cursor = conn.exec_driver_sql(
                 "UPDATE kill_report_items SET count = ? WHERE report_id = ? AND kill_type = ?",
                 (count, report_id, kill_type)
             )
-            conn.commit()
             return cursor.rowcount > 0
 
     @staticmethod
     def delete_kill_entry(report_id: int, kill_type: str) -> bool:
         """Removes a kill report entry (and its report once it has no entries left). False if already gone."""
-        with get_db() as conn:
-            cursor = conn.execute(
+        with db.begin() as conn:
+            cursor = conn.exec_driver_sql(
                 "DELETE FROM kill_report_items WHERE report_id = ? AND kill_type = ?",
                 (report_id, kill_type)
             )
-            conn.execute(
+            conn.exec_driver_sql(
                 "DELETE FROM kill_reports WHERE id = ? AND NOT EXISTS "
                 "(SELECT 1 FROM kill_report_items WHERE report_id = ?)",
                 (report_id, report_id)
             )
-            conn.commit()
             return cursor.rowcount > 0
 
     @staticmethod
@@ -360,8 +346,8 @@ class AirfieldRepository:
         """Kill reports of a war: totals per kill type and a pilot leaderboard with each pilot's kills by type."""
         if war_number is None:
             war_number = settings.get_active_war()
-        with get_db() as conn:
-            rows = conn.execute(
+        with db.connect() as conn:
+            rows = conn.exec_driver_sql(
                 """
                 SELECT r.user_id, i.kill_type, SUM(i.count) AS kills
                 FROM kill_report_items i JOIN kill_reports r ON r.id = i.report_id
@@ -369,13 +355,17 @@ class AirfieldRepository:
                 GROUP BY r.user_id, i.kill_type
                 """,
                 (war_number,)
-            ).fetchall()
+            ).mappings().fetchall()
 
-        kill_config = config.features.airfield
-        label = kill_config.kill_type_label  # a type removed from the config still shows under its stored key
-        position = kill_config.kill_type_position
+        # The kill types are the enemy of whichever faction was played in that war.
+        kill_types = config.world.enemy_planes(settings.get_faction(war_number))
+        keys = [t.key for t in kill_types]
+        label = config.world.unit_label  # a type removed from the config still shows under its stored key
 
-        totals = {t.key: 0 for t in kill_config.kill_types}
+        def position(key: str) -> int:
+            return keys.index(key) if key in keys else len(keys)
+
+        totals = {key: 0 for key in keys}
         pilots: dict[str, dict] = {}
         for row in rows:
             totals[row["kill_type"]] = totals.get(row["kill_type"], 0) + row["kills"]
@@ -399,8 +389,8 @@ class AirfieldRepository:
         """
         if war_number is None:
             war_number = settings.get_active_war()
-        with get_db() as conn:
-            kill_rows = conn.execute(
+        with db.connect() as conn:
+            kill_rows = conn.exec_driver_sql(
                 """
                 SELECT r.user_id, SUM(i.count) AS kills
                 FROM kill_reports r JOIN kill_report_items i ON i.report_id = r.id
@@ -408,8 +398,8 @@ class AirfieldRepository:
                 GROUP BY r.user_id
                 """,
                 (war_number,)
-            ).fetchall()
-            flight_rows = conn.execute(
+            ).mappings().fetchall()
+            flight_rows = conn.exec_driver_sql(
                 """
                 SELECT removed_by AS user_id, COUNT(*) AS flights, SUM(status = 'Loss') AS deaths
                 FROM plane_instances
@@ -417,7 +407,7 @@ class AirfieldRepository:
                 GROUP BY removed_by
                 """,
                 (war_number,)
-            ).fetchall()
+            ).mappings().fetchall()
 
         pilots: dict[str, dict] = {}
         for row in kill_rows:
@@ -450,16 +440,16 @@ class AirfieldRepository:
             raise ValueError(f"source must be one of {', '.join(STOCK_SOURCES)}")
         not_production = AirfieldRepository._NOT_PRODUCTION
         source_sql = "COALESCE(source, ?)"
-        with get_db() as conn:
-            by_type = conn.execute(
+        with db.connect() as conn:
+            by_type = conn.exec_driver_sql(
                 f"""
                 SELECT plane_type, COUNT(*) AS count FROM plane_instances
                 WHERE war_number = ? AND added_by NOT IN (?, ?) AND (? IS NULL OR {source_sql} = ?)
                 GROUP BY plane_type
                 """,
                 (war_number, *not_production, source, DEFAULT_STOCK_SOURCE, source)
-            ).fetchall()
-            by_source_rows = conn.execute(
+            ).mappings().fetchall()
+            by_source_rows = conn.exec_driver_sql(
                 f"""
                 SELECT {source_sql} AS source, COUNT(*) AS count FROM plane_instances
                 WHERE war_number = ? AND added_by NOT IN (?, ?) AND (? IS NULL OR {source_sql} = ?)
@@ -467,23 +457,23 @@ class AirfieldRepository:
                 """,
                 (DEFAULT_STOCK_SOURCE, war_number, *not_production, source,
                  DEFAULT_STOCK_SOURCE, source, DEFAULT_STOCK_SOURCE)
-            ).fetchall()
-            producers = conn.execute(
+            ).mappings().fetchall()
+            producers = conn.exec_driver_sql(
                 f"""
                 SELECT added_by AS user_id, COUNT(*) AS count FROM plane_instances
                 WHERE war_number = ? AND added_by NOT IN (?, ?) AND (? IS NULL OR {source_sql} = ?)
                 GROUP BY added_by ORDER BY count DESC, added_by LIMIT ?
                 """,
                 (war_number, *not_production, source, DEFAULT_STOCK_SOURCE, source, producer_limit)
-            ).fetchall()
-            lost_by_type = conn.execute(
+            ).mappings().fetchall()
+            lost_by_type = conn.exec_driver_sql(
                 """
                 SELECT plane_type, COUNT(*) AS count FROM plane_instances
                 WHERE war_number = ? AND status = 'Loss'
                 GROUP BY plane_type
                 """,
                 (war_number,)
-            ).fetchall()
+            ).mappings().fetchall()
         counts_by_source = {r["source"]: r["count"] for r in by_source_rows}
         return {
             "by_type": by_type,

@@ -1,14 +1,13 @@
 import discord
 from discord import ui
+from app.libs.content.text import clip
+from app.libs.discord.limits import MAX_INPUT_LABEL, MAX_MODAL_INPUTS, MAX_MODAL_TITLE
+from app.libs.discord.responses import Responder
 from app.libs.modals import BaseModal, FacilityModal
-from app.libs.views.views import (
-    AMOUNT_PATTERN, BaseView, FacilitySelect, respond_or_followup
-)
+from app.libs.views.views import AMOUNT_PATTERN, BaseView, FacilitySelect
 from app.features.bank.board import sync_stockpile_board  # Updated to sync the unified board
 from app.features.bank.permissions import can_use_bank
 from app.features.bank.repository import BankRepository
-
-MAX_MODAL_FIELDS = 5  # Discord allows at most five inputs in one form
 
 
 class CreateStockpileModal(FacilityModal, title="Add Officer Stockpile"):
@@ -25,20 +24,18 @@ class CreateStockpileModal(FacilityModal, title="Add Officer Stockpile"):
         # Refresh the single unified stockpile board message
         await sync_stockpile_board(interaction.guild)
 
-        await interaction.followup.send(
-            f"Stockpile **{name}** added. Use Update Stock to enter how much it holds.", ephemeral=True
-        )
+        await Responder(interaction).send(f"Stockpile **{name}** added. Use Update Stock to enter how much it holds.")
 
 
 class UpdateStockModal(BaseModal):
     """One field per tracked material, pre-filled with the current amount. Whatever is entered becomes the new total."""
 
     def __init__(self, stockpile_id: int, stockpile_name: str, balances: dict[str, int]):
-        super().__init__(title=f"Update {stockpile_name}"[:45])
+        super().__init__(title=clip(f"Update {stockpile_name}", MAX_MODAL_TITLE))
         self.stockpile_id = stockpile_id
         self.fields_by_resource: dict[str, ui.TextInput] = {}
-        for label, amount in list(balances.items())[:MAX_MODAL_FIELDS]:
-            field = ui.TextInput(label=label, default=str(amount), required=True, max_length=9)
+        for label, amount in list(balances.items())[:MAX_MODAL_INPUTS]:
+            field = ui.TextInput(label=clip(label, MAX_INPUT_LABEL), default=str(amount), required=True, max_length=9)
             self.add_item(field)
             self.fields_by_resource[label] = field
 
@@ -47,15 +44,13 @@ class UpdateStockModal(BaseModal):
         for label, field in self.fields_by_resource.items():
             raw = field.value.strip().replace(",", "")
             if not AMOUNT_PATTERN.fullmatch(raw):
-                await interaction.response.send_message(
-                    f"**{label}** must be a whole number, 0 or higher.", ephemeral=True
-                )
+                await Responder(interaction).send(f"**{label}** must be a whole number, 0 or higher.")
                 return
             amounts[label] = int(raw)
 
         stockpile = BankRepository.get_stockpile(self.stockpile_id)
         if not stockpile or stockpile["status"] != "ACTIVE":
-            await interaction.response.send_message("That stockpile no longer exists.", ephemeral=True)
+            await Responder(interaction).send("That stockpile no longer exists.")
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -64,9 +59,9 @@ class UpdateStockModal(BaseModal):
             # Refresh the single unified stockpile board message
             await sync_stockpile_board(interaction.guild)
             lines = "\n".join(f"{label}: {old:,} to {new:,}" for label, old, new in changes)
-            await interaction.followup.send(f"Updated **{stockpile['name']}**.\n{lines}", ephemeral=True)
+            await Responder(interaction).send(f"Updated **{stockpile['name']}**.\n{lines}")
         else:
-            await interaction.followup.send("No changes. Those are already the current amounts.", ephemeral=True)
+            await Responder(interaction).send("No changes. Those are already the current amounts.")
 
 
 class StockpileSelect(FacilitySelect):
@@ -82,7 +77,7 @@ class StockpileSelect(FacilitySelect):
     async def on_pick(self, interaction: discord.Interaction, stockpile_id: int):
         stockpile = BankRepository.get_stockpile(stockpile_id)
         if not stockpile or stockpile["status"] != "ACTIVE":
-            await respond_or_followup(interaction, "That stockpile no longer exists.")
+            await Responder(interaction).send("That stockpile no longer exists.")
             return
 
         if self.action == "update":
@@ -95,8 +90,8 @@ class StockpileSelect(FacilitySelect):
             # Refresh the single unified stockpile board message to remove it
             await sync_stockpile_board(interaction.guild)
 
-            await interaction.followup.send(
-                f"Stockpile **{stockpile['name']}** deleted. Its history is kept for reports.", ephemeral=True
+            await Responder(interaction).send(
+                f"Stockpile **{stockpile['name']}** deleted. Its history is kept for reports."
             )
 
 
@@ -111,7 +106,7 @@ class BankControlView(BaseView):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if can_use_bank(interaction.user):
             return True
-        await interaction.response.send_message("You don't have permission to use these controls.", ephemeral=True)
+        await Responder(interaction).send("You don't have permission to use these controls.")
         return False
 
     @ui.button(label="Add Stockpile", style=discord.ButtonStyle.green, custom_id="bank:add_stockpile")
@@ -122,10 +117,10 @@ class BankControlView(BaseView):
     async def update_stock(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(StockpileSelect("update"))
-        await interaction.response.send_message("Select the stockpile to update:", view=view, ephemeral=True)
+        await Responder(interaction).send("Select the stockpile to update:", view=view)
 
     @ui.button(label="Delete Stockpile", style=discord.ButtonStyle.danger, custom_id="bank:delete_stockpile")
     async def delete_stockpile(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(StockpileSelect("delete"))
-        await interaction.response.send_message("Select the stockpile to delete:", view=view, ephemeral=True)
+        await Responder(interaction).send("Select the stockpile to delete:", view=view)

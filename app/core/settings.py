@@ -2,7 +2,7 @@
 from sqlalchemy import text
 
 from app.libs.world.faction import Faction
-from app.core .database import db
+from app.core.database import db
 
 DEFAULT_FACTION = Faction.Warden
 

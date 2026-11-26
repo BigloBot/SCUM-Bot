@@ -4,11 +4,9 @@ from app.libs.discord.limits import MAX_SELECT_OPTIONS
 from app.libs.models import Strict
 from app.libs.world.faction import Faction
 
-from app.core.settings import set_faction
-
 
 class UnitType(Strict):
-    model_config = ConfigDict(extra="forbid", froxen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     key: str
     label: str
@@ -23,7 +21,7 @@ class Vehicles(Strict):
         return [unit for category in type(self).model_fields for unit in getattr(self, category)]
 
 class Roster(Strict):
-    vehicles: vehicles = Field(default_factory=Vehicles)
+    vehicles: Vehicles = Field(default_factory=Vehicles)
 
     def units(self, category: str) -> list[UnitType]:
         return list(getattr(self.vehicles, category))
@@ -36,9 +34,9 @@ class Forces(Strict):
     _by_key: dict[str, UnitType] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, context) -> None:
-        self._by_key = {u_key: u for roster in self._rosters() for u in roster.vehicles.all()}
+        self._by_key = {u.key: u for roster in self._rosters() for u in roster.vehicles.all()}
 
-    @model_validator
+    @model_validator(mode="after")
     def _check(self) -> "Forces":
         keys = [u.key for roster in self._rosters() for u in roster.vehicles.all()]
         if len(keys) != len(set(keys)):
@@ -47,12 +45,12 @@ class Forces(Strict):
             count = len(self.planes(faction))
             if count > MAX_SELECT_OPTIONS:
                 raise ValueError(
-                    f"{faction} has {count} planes including shared; a dropdown can hold most {MAX_SELECT_OPTIONS}"
+                    f"{faction} has {count} planes including shared; a dropdown can hold at most {MAX_SELECT_OPTIONS}"
                 )
         return self
 
     def _rosters(self) -> list[Roster]:
-        return[*self.factions.values(), self.shared]
+        return [*self.factions.values(), self.shared]
 
     def own(self, faction: Faction, category: str) -> list[UnitType]:
         roster = self.factions.get(faction)

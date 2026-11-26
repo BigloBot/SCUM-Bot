@@ -1,18 +1,19 @@
-# app/features/airfield/threads.py
+"""Forum thread helpers: create, find, post to, edit and open/close threads, tolerating locked and archived ones."""
 import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 import discord
 
 from app.libs.content.text import clip
 from app.libs.discord.limits import MAX_THREAD_NAME
 
-
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 NO_PINGS = discord.AllowedMentions.none()
+
+ThreadStateResult = Literal["changed", "unchanged", "missing", "failed"]
 
 
 async def create_forum_thread(
@@ -25,10 +26,11 @@ async def create_forum_thread(
         view: discord.ui.View | None = None,
         auto_archive_minutes: int | None = None,
 ) -> discord.Thread | None:
-
+    """Starts a thread in the forum. None when no forum is set up, or when Discord refuses (the cause is logged)."""
     forum = guild.get_channel(int(forum_id)) if forum_id else None
     if not isinstance(forum, discord.ForumChannel):
         return None
+
     options: dict = {}
     if embed is not None:
         options["embed"] = embed
@@ -38,13 +40,14 @@ async def create_forum_thread(
         options["auto_archive_duration"] = auto_archive_minutes
 
     try:
-        created = await forum.created_thread(
+        created = await forum.create_thread(
             name=clip(title, MAX_THREAD_NAME), content=content, allowed_mentions=NO_PINGS, **options
         )
     except discord.HTTPException:
-        logger.error("Could not created a thread in forum %s.", forum_id, exc_info=True)
+        logger.error("Could not create a thread in forum %s.", forum_id, exc_info=True)
         return None
     return created.thread
+
 
 async def create_recorded_thread(
         guild: discord.Guild,
@@ -54,7 +57,11 @@ async def create_recorded_thread(
         content: str | None = None,
         **options,
 ) -> T:
-    thread = await created_forum_thread(guild, forum_id, title, content, **options)
+    """
+    Creates a thread, then calls `record(thread)` to save it (`thread` is None when none could be made).
+    If saving fails the thread is deleted again, so no thread is left behind with nothing pointing at it.
+    """
+    thread = await create_forum_thread(guild, forum_id, title, content, **options)
     try:
         return record(thread)
     except Exception:
@@ -62,39 +69,9 @@ async def create_recorded_thread(
             await delete_thread(guild, thread.id)
         raise
 
-async def _set_state(thread: discord.Thread, *, archived: bool, locked: bool, reason: str | None = None, name: str | None = None) -> discord.Thread:
-    if thread.archived:
-        thread = await thread.edit(archived=False, reason=reason)
-    options = {"name": name} if name else {}
-    return await thread.edit(archived=archived, locked=locked, reason=reason, **options)
-
-@asynccontextmanager
-async def _opened(thread: discord.Thread):
-    was_archived, was_locked = thread.archived, thread.locked
-    if was_archived or was_locked:
-        thread = await _set_state(thread, archived=False, locked=False)
-        try:
-            yield thread
-        finally:
-            if was_archived or was_locked:
-                await _set_state(thread, archived=was_archived, locked=was_locked)
-
-async def edit_thread_start(guild: discord.Guild, thread_id: int | str, **edits) -> bool:
-    thread = await fetch_thread(guild, thread_id)
-    if not thread:
-        return False
-
-    try:
-        async with _opened(thread) as opened:
-            await opened.get_partial_message(opened.id).edit(**edits))
-        return True
-    except
-        discord.HTTPException:
-        logger.error("")
-
 
 async def fetch_thread(guild: discord.Guild, thread_id: int | str) -> discord.Thread | None:
-    """Gets a thread from cache or API."""
+    """Gets a thread from cache or the API. None when it is gone or the id isn't valid."""
     try:
         thread_id = int(thread_id)
     except (ValueError, TypeError):
@@ -106,45 +83,94 @@ async def fetch_thread(guild: discord.Guild, thread_id: int | str) -> discord.Th
 
     try:
         channel = await guild.fetch_channel(thread_id)
-        return channel if isinstance(channel, discord.Thread) else None
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
         return None
+    return channel if isinstance(channel, discord.Thread) else None
+
+
+async def delete_thread(guild: discord.Guild, thread_id: int | str) -> bool:
+    """Deletes a thread. False when it is already gone or can't be deleted."""
+    thread = await fetch_thread(guild, thread_id)
+    if thread is None:
+        return False
+    try:
+        await thread.delete()
+    except discord.HTTPException:
+        logger.error("Could not delete thread %s.", thread_id, exc_info=True)
+        return False
+    return True
+
+
+async def _set_state(
+        thread: discord.Thread, *, archived: bool, locked: bool, reason: str | None = None
+) -> discord.Thread:
+    """Sets archived/locked. An archived thread has to be reopened before it can be edited at all."""
+    if thread.archived:
+        thread = await thread.edit(archived=False, reason=reason)
+    return await thread.edit(archived=archived, locked=locked, reason=reason)
+
+
+@asynccontextmanager
+async def _opened(thread: discord.Thread):
+    """Yields the thread unarchived and unlocked, then puts it back the way it was found."""
+    was_archived, was_locked = thread.archived, thread.locked
+    if was_archived or was_locked:
+        thread = await _set_state(thread, archived=False, locked=False)
+    try:
+        yield thread
+    finally:
+        if was_archived or was_locked:
+            try:
+                await _set_state(thread, archived=was_archived, locked=was_locked)
+            except discord.HTTPException:
+                logger.error("Could not restore the state of thread %s.", thread.id, exc_info=True)
+
+
+async def edit_thread_start(guild: discord.Guild, thread_id: int | str, **edits) -> bool:
+    """Edits the first message of a forum thread (content, embed, view...). False if that couldn't be done."""
+    thread = await fetch_thread(guild, thread_id)
+    if thread is None:
+        return False
+
+    try:
+        async with _opened(thread) as opened:
+            await opened.get_partial_message(opened.id).edit(**edits)
+    except discord.HTTPException:
+        logger.error("Could not edit the first message of thread %s.", thread_id, exc_info=True)
+        return False
+    return True
 
 
 async def send_thread_message(guild: discord.Guild, thread_id: int | str, content: str) -> bool:
-    """Sends a message to a thread, temporarily unlocking it if locked."""
+    """Sends a message to a thread, temporarily unlocking and unarchiving it if needed."""
     thread = await fetch_thread(guild, thread_id)
-    if not thread:
+    if thread is None:
         return False
 
     try:
-        was_locked = thread.locked
-        if was_locked:
-            await thread.edit(locked=False)
-
-        await thread.send(content, allowed_mentions=NO_PINGS)
-
-        if was_locked:
-            await thread.edit(locked=True)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to post to thread {thread_id}: {e}")
+        async with _opened(thread) as opened:
+            await opened.send(content, allowed_mentions=NO_PINGS)
+    except discord.HTTPException:
+        logger.error("Failed to post to thread %s.", thread_id, exc_info=True)
         return False
+    return True
 
 
-async def update_thread_state(guild: discord.Guild, thread_id: int | str, is_open: bool, reason: str) -> str:
-    """Sets a thread's archived/locked state."""
+async def update_thread_state(
+        guild: discord.Guild, thread_id: int | str, is_open: bool, reason: str
+) -> ThreadStateResult:
+    """Opens a thread (unarchived, unlocked) or closes it (archived, locked)."""
     thread = await fetch_thread(guild, thread_id)
-    if not thread:
+    if thread is None:
         return "missing"
 
-    target_state = not is_open
-    if thread.archived == target_state and thread.locked == target_state:
+    closed = not is_open
+    if thread.archived == closed and thread.locked == closed:
         return "unchanged"
 
     try:
-        await thread.edit(archived=target_state, locked=target_state, reason=reason)
-        return "changed"
-    except Exception as e:
-        logger.error(f"Failed to set thread state for {thread_id}: {e}")
+        await _set_state(thread, archived=closed, locked=closed, reason=reason)
+    except discord.HTTPException:
+        logger.error("Failed to set the state of thread %s.", thread_id, exc_info=True)
         return "failed"
+    return "changed"

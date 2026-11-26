@@ -1,18 +1,16 @@
-import logging
 import discord
 from discord import ui
+from app.libs.discord.responses import Responder
+from app.libs.discord.threads import create_recorded_thread
 from app.core import settings
 from app.libs.modals import BaseModal, FacilityModal
 from app.features.airfield.dashboard import refresh_controls
 from app.features.airfield.repository import DEFAULT_STOCK_SOURCE, AirfieldRepository
-from app.features.airfield.service import format_depot_thread_title
+from app.features.airfield.service import format_depot_thread_title, log_depot_event
 from app.features.airfield.views.depot.flight import (
     checkout_and_log,
     finish_flight,
-    log_to_depot_thread,
 )
-
-logger = logging.getLogger(__name__)
 
 class CreateDepotModal(FacilityModal, title="Create Airfield Depot"):
     noun = "depot"
@@ -25,27 +23,19 @@ class CreateDepotModal(FacilityModal, title="Create Airfield Depot"):
 
     async def create(self, interaction: discord.Interaction, name: str, code: str, location: str):
         war_number = settings.get_active_war()
-        forum_channel_id = AirfieldRepository.get_config("forum_channel_id")
-        thread = None
-        if forum_channel_id:
-            forum = interaction.guild.get_channel(int(forum_channel_id))
-            if isinstance(forum, discord.ForumChannel):
-                try:
-                    thread_content = (
-                        f"🏗️ {interaction.user.mention} has created this depot.\n"
-                        f"War: **{war_number}**\nName: **{name}**\nCode: **{code.upper()}**\nLocation: **{location}**"
-                    )
-                    created_thread = await forum.create_thread(
-                        name=format_depot_thread_title(war_number, name, location),
-                        content=thread_content,
-                        allowed_mentions=discord.AllowedMentions.none()
-                    )
-                    thread = created_thread.thread
-                except Exception as e:
-                    logger.error(f"Error creating forum thread: {e}")
-
-        AirfieldRepository.add_airfield(name, code, location, str(thread.id) if thread else None)
-        await interaction.send(f"Depot **{name}** created. Location: **{location}**.")
+        content = (
+            f"🏗️ {interaction.user.mention} has created this depot.\n"
+            f"War: **{war_number}**\nName: **{name}**\nCode: **{code.upper()}**\nLocation: **{location}**"
+        )
+        # The thread is deleted again if the depot can't be saved, so none is left behind.
+        await create_recorded_thread(
+            interaction.guild,
+            AirfieldRepository.get_config("forum_channel_id"),
+            format_depot_thread_title(war_number, name, location),
+            lambda thread: AirfieldRepository.add_airfield(name, code, location, str(thread.id) if thread else None),
+            content,
+        )
+        await Responder(interaction).send(f"Depot **{name}** created. Location: **{location}**.")
         await refresh_controls(interaction.guild)
 
 
@@ -63,7 +53,7 @@ def add_stock(airfield_id: int, plane_type: str, user_id: str, source: str, qty:
 
 async def log_stock_added(interaction: discord.Interaction, airfield_id: int, plane_type: str, source: str, qty: int):
     """Posts the stock addition in the depot thread and refreshes the control panel. Call after replying."""
-    await log_to_depot_thread(
+    await log_depot_event(
         interaction.guild,
         airfield_id,
         f"📦 {interaction.user.mention} has added {stock_added_text(plane_type, source, qty)} to the stockpile."
@@ -102,6 +92,6 @@ class LossCauseModal(BaseModal, title="Log Loss"):
     async def on_submit(self, interaction: discord.Interaction):
         cause = self.cause.value.strip()
         if not cause:
-            await interaction.send("Tell us how you died so the loss can be logged. Press Loss to try again.")
+            await Responder(interaction).send("Tell us how you died so the loss can be logged. Press Loss to try again.")
             return
         await finish_flight(interaction, "Loss", cause=cause)

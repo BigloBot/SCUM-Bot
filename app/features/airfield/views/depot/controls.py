@@ -1,5 +1,6 @@
 import discord
 from discord import ui
+from app.libs.discord.responses import Responder
 from app.libs.views.views import BaseView
 from app.features.airfield.permissions import can_use_airfield
 from app.features.airfield.repository import AirfieldRepository
@@ -17,7 +18,7 @@ class FlightReturnStatusView(BaseView):
     @ui.button(label="Returned", style=discord.ButtonStyle.green, emoji="🛬")
     async def returned(self, interaction: discord.Interaction, button: ui.Button):
         if self.is_transport:
-            await interaction.send(
+            await Responder(interaction).send(
                 "Transport flight: select the depot the aircraft was delivered to.",
                 view=DestinationSelectView(self.airfield_id)
             )
@@ -27,7 +28,7 @@ class FlightReturnStatusView(BaseView):
     @ui.button(label="Loss", style=discord.ButtonStyle.danger, emoji="💥")
     async def loss(self, interaction: discord.Interaction, button: ui.Button):
         if not AirfieldRepository.get_user_active_flight(str(interaction.user.id)):
-            await interaction.send("You don't have an active flight to log.")
+            await Responder(interaction).send("You don't have an active flight to log.")
             return
         await interaction.response.send_modal(LossCauseModal())
 
@@ -45,23 +46,23 @@ class DepotManagementView(BaseView):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if can_use_airfield(interaction.user):
             return True
-        await interaction.send("You don't have permission to use these controls.")
+        await Responder(interaction).send("You don't have permission to use these controls.")
         return False
 
     @ui.button(label="Take Out Aircraft", style=discord.ButtonStyle.green, custom_id="scum:flight", row=0)
     async def take_out(self, interaction: discord.Interaction, button: ui.Button):
         if not AirfieldRepository.get_airfields():
-            await interaction.send("There are no depots in the active war yet.")
+            await Responder(interaction).send("There are no depots in the active war yet.")
             return
-        await interaction.send("Select the depot you are taking an aircraft from:", view=DepotFlightView())
+        await Responder(interaction).send("Select the depot you are taking an aircraft from:", view=DepotFlightView())
 
     @ui.button(label="Log Flight Outcome", style=discord.ButtonStyle.primary, custom_id="scum:return", row=0)
     async def log_return(self, interaction: discord.Interaction, button: ui.Button):
         active_flight = AirfieldRepository.get_user_active_flight(str(interaction.user.id))
         if not active_flight:
-            await interaction.send("You don't have an active flight to log.")
+            await Responder(interaction).send("You don't have an active flight to log.")
             return
-        await interaction.send(
+        await Responder(interaction).send(
             f"Logging your **{active_flight['plane_type']}** flight. Select how it ended:",
             view=FlightReturnStatusView(active_flight)
         )
@@ -74,16 +75,16 @@ class DepotManagementView(BaseView):
     async def add_stock(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(DepotSelect("add_stock"))
-        await interaction.send("Select aircraft depot:", view=view)
+        await Responder(interaction).send("Select aircraft depot:", view=view)
 
     @ui.button(label="View Depots", style=discord.ButtonStyle.secondary, custom_id="scum:view_depots", row=1)
     async def view_depots(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(DepotSelect("view_details"))
-        await interaction.send("Select the depot to view:", view=view)
+        await Responder(interaction).send("Select the depot to view:", view=view)
 
     @ui.button(label="Delete Depot", style=discord.ButtonStyle.danger, custom_id="scum:delete_depot", row=1)
     async def delete_depot(self, interaction: discord.Interaction, button: ui.Button):
         view = BaseView()
         view.add_item(DepotSelect("delete"))
-        await interaction.send("Select the depot to delete:", view=view)
+        await Responder(interaction).send("Select the depot to delete:", view=view)
